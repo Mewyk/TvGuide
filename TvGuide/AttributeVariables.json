@@ -1,0 +1,22 @@
+{
+  "CommandAddLiveUser": {
+    "Name": "tvguide",
+    "Description": "Tv Guide Commands"
+  },
+  "SubCommandAddLiveUser": {
+    "Name": "add",
+    "Description": "Add a user to the NowLive channel"
+  },
+  "CommandParametersAddLiveUser": {
+    "Name": "Add a streamer to the NowLiveCommands channel",
+    "Description": "Username of the user that you want to add"
+  },
+  "SubCommandRemoveLiveUser": {
+    "Name": "remove",
+    "Description": "Remove a user from the NowLive channel"
+  },
+  "CommandParametersRemoveLiveUser": {
+    "Name": "Remove a streamer from the NowLiveCommands channel",
+    "Description": "Username of the user that you want to remove"
+  }
+}
