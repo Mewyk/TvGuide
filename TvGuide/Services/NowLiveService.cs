@@ -15,23 +15,23 @@ public class NowLiveService(
     IUsersModule usersModule,
     IOptions<Configuration> settings,
     ILogger<NowLiveService> logger,
-    NowLiveStates streamState
-) : BackgroundService, INowStreamingService
+    BroadcastStates broadcastState
+) : BackgroundService, INowLiveService
 {
-    private readonly IStreamsModule _streamService = streamsModule;
+    private readonly IStreamsModule _nowLiveService = streamsModule;
     private readonly IUsersModule _usersModule = usersModule;
+    private readonly ILogger<NowLiveService> _logger = logger;
     private readonly DataModule _data = data;
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
     private readonly LogMessages _logMessages = settings.Value.LogMessages;
-    private readonly ILogger<NowLiveService> _logger = logger;
-    private readonly ConcurrentDictionary<string, Streamer> _users = new();
-    private readonly NowLiveStates _streamState = streamState;
+    private readonly ConcurrentDictionary<string, TwitchStreamer> _users = new();
+    private readonly BroadcastStates _broadcastState = broadcastState;
 
     // Bulk event handlers
-    public event EventHandler<UsersEventArguments>? StreamStateOnline;
-    public event EventHandler<UsersEventArguments>? StreamStateOffline;
-    public event EventHandler<UsersEventArguments>? StreamStateUnchanged;
-    public event EventHandler<UsersEventArguments>? StreamStateMediaRefresh;
+    public event EventHandler<UsersEventArguments>? BroadcastStateOnline;
+    public event EventHandler<UsersEventArguments>? BroadcastStateOffline;
+    public event EventHandler<UsersEventArguments>? BroadcastStateUnchanged;
+    public event EventHandler<UsersEventArguments>? BroadcastStateMediaRefresh;
 
     // Service lifecycle event handlers
     public event EventHandler<ServiceEventArguments>? ServiceStarting;
@@ -43,7 +43,7 @@ public class NowLiveService(
     public event EventHandler<UsersEventArguments>? UserAdded;
     public event EventHandler<UsersEventArguments>? UserRemoved;
 
-    public event EventHandler<ErrorEventArguments>? UserStreamError;
+    public event EventHandler<ErrorEventArguments>? UserBroadcastError;
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
@@ -54,19 +54,19 @@ public class NowLiveService(
         {
             _logger.LogInformation("Starting");
 
-            StreamStateOnline += _streamState.OnStreamStateOnline;
-            StreamStateOffline += _streamState.OnStreamStateOffline;
-            StreamStateUnchanged += _streamState.OnStreamStateUnchanged;
-            StreamStateMediaRefresh += _streamState.OnStreamStateMediaRefresh;
+            BroadcastStateOnline += _broadcastState.OnBroadcastStateOnline;
+            BroadcastStateOffline += _broadcastState.OnBroadcastStateOffline;
+            BroadcastStateUnchanged += _broadcastState.OnBroadcastStateUnchanged;
+            BroadcastStateMediaRefresh += _broadcastState.OnBroadcastStateMediaRefresh;
 
-            UserAdded += _streamState.OnUserAdded;
-            UserRemoved += _streamState.OnUserRemoved;
+            UserAdded += _broadcastState.OnUserAdded;
+            UserRemoved += _broadcastState.OnUserRemoved;
 
-            UserStreamError += _streamState.OnUserStreamError;
-            ServiceStarting += _streamState.OnServiceStarting;
-            ServiceStarted += _streamState.OnServiceStarted;
-            ServiceExiting += _streamState.OnServiceExiting;
-            ServiceExited += _streamState.OnServiceExited;
+            UserBroadcastError += _broadcastState.OnUserStreamError;
+            ServiceStarting += _broadcastState.OnServiceStarting;
+            ServiceStarted += _broadcastState.OnServiceStarted;
+            ServiceExiting += _broadcastState.OnServiceExiting;
+            ServiceExited += _broadcastState.OnServiceExited;
 
             //TODO: Make better use of the Starting vs Started
             ServiceStarting?.Invoke(this, 
@@ -75,7 +75,7 @@ public class NowLiveService(
             await LoadUsersAsync(cancellationToken);
 
             while (await periodicTimer.WaitForNextTickAsync(cancellationToken))
-                await UpdateStreamStatesAsync(cancellationToken);
+                await UpdateBroadcastStatesAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -86,19 +86,19 @@ public class NowLiveService(
 
             await _data.SaveUsersAsync(_users.Values, CancellationToken.None);
 
-            StreamStateOnline -= _streamState.OnStreamStateOnline;
-            StreamStateOffline -= _streamState.OnStreamStateOffline;
-            StreamStateUnchanged -= _streamState.OnStreamStateUnchanged;
-            StreamStateMediaRefresh -= _streamState.OnStreamStateMediaRefresh;
+            BroadcastStateOnline -= _broadcastState.OnBroadcastStateOnline;
+            BroadcastStateOffline -= _broadcastState.OnBroadcastStateOffline;
+            BroadcastStateUnchanged -= _broadcastState.OnBroadcastStateUnchanged;
+            BroadcastStateMediaRefresh -= _broadcastState.OnBroadcastStateMediaRefresh;
 
-            UserAdded -= _streamState.OnUserAdded;
-            UserRemoved -= _streamState.OnUserRemoved;
+            UserAdded -= _broadcastState.OnUserAdded;
+            UserRemoved -= _broadcastState.OnUserRemoved;
 
-            UserStreamError -= _streamState.OnUserStreamError;
-            ServiceStarting -= _streamState.OnServiceStarting;
-            ServiceStarted -= _streamState.OnServiceStarted;
-            ServiceExiting -= _streamState.OnServiceExiting;
-            ServiceExited -= _streamState.OnServiceExited;
+            UserBroadcastError -= _broadcastState.OnUserStreamError;
+            ServiceStarting -= _broadcastState.OnServiceStarting;
+            ServiceStarted -= _broadcastState.OnServiceStarted;
+            ServiceExiting -= _broadcastState.OnServiceExiting;
+            ServiceExited -= _broadcastState.OnServiceExited;
         }
         finally
         {
@@ -126,7 +126,7 @@ public class NowLiveService(
         GC.SuppressFinalize(this);
     }
 
-    private async Task UpdateStreamStatesAsync(CancellationToken cancellationToken)
+    private async Task UpdateBroadcastStatesAsync(CancellationToken cancellationToken)
     {
         var userBatches = _users.Values
             .Select(user => user.UserData.Id)
@@ -134,28 +134,28 @@ public class NowLiveService(
 
         foreach (var batch in userBatches)
         {
-            var onlineUsers = new List<Streamer>();
-            var offlineUsers = new List<Streamer>();
-            var unchangedUsers = new List<Streamer>();
-            var mediaRefreshUsers = new List<Streamer>();
+            var onlineUsers = new List<TwitchStreamer>();
+            var offlineUsers = new List<TwitchStreamer>();
+            var unchangedUsers = new List<TwitchStreamer>();
+            var mediaRefreshUsers = new List<TwitchStreamer>();
 
             try
             {
-                var (Streams, NextCursor) = await _streamService.GetStreamsAsync(
+                var (TwitchStreams, NextCursor) = await _nowLiveService.GetStreamsAsync(
                     new TwitchStreamRequest
                     {
                         UserIds = [.. batch],
                         Type = "live"
                     }, cancellationToken);
 
-                var liveUserIds = Streams.Select(stream => stream.UserId);
+                var liveUserIds = TwitchStreams.Select(twitchStream => twitchStream.UserId);
 
                 var tasks = batch.Select(async userId =>
                 {
                     if (_users.TryGetValue(userId, out var user))
                     {
-                        user.StreamData = Streams
-                            .FirstOrDefault(streamUser => streamUser.UserId == userId);
+                        user.StreamData = TwitchStreams
+                            .FirstOrDefault(User => User.UserId == userId);
 
                         await UpdateUserStateAsync(
                             user, onlineUsers, offlineUsers,
@@ -166,28 +166,28 @@ public class NowLiveService(
                 await Task.WhenAll(tasks);
 
                 if (onlineUsers.Count != 0)
-                    StreamStateOnline?.Invoke(this, new UsersEventArguments
+                    BroadcastStateOnline?.Invoke(this, new UsersEventArguments
                     {
                         Users = onlineUsers,
                         CancellationToken = cancellationToken
                     });
 
                 if (offlineUsers.Count != 0)
-                    StreamStateOffline?.Invoke(this, new UsersEventArguments
+                    BroadcastStateOffline?.Invoke(this, new UsersEventArguments
                     {
                         Users = offlineUsers,
                         CancellationToken = cancellationToken
                     });
 
                 if (unchangedUsers.Count != 0)
-                    StreamStateUnchanged?.Invoke(this, new UsersEventArguments
+                    BroadcastStateUnchanged?.Invoke(this, new UsersEventArguments
                     {
                         Users = unchangedUsers,
                         CancellationToken = cancellationToken
                     });
 
                 if (mediaRefreshUsers.Count != 0)
-                    StreamStateMediaRefresh?.Invoke(this, new UsersEventArguments
+                    BroadcastStateMediaRefresh?.Invoke(this, new UsersEventArguments
                     {
                         Users = mediaRefreshUsers,
                         CancellationToken = cancellationToken
@@ -196,7 +196,7 @@ public class NowLiveService(
             catch (Exception exception)
             {
                 foreach (var userId in batch)
-                    UserStreamError?.Invoke(this, new ErrorEventArguments
+                    UserBroadcastError?.Invoke(this, new ErrorEventArguments
                     {
                         UserId = userId,
                         Message = _logMessages.Errors.WasNotUpdated,
@@ -211,11 +211,11 @@ public class NowLiveService(
     }
 
     private async Task UpdateUserStateAsync(
-        Streamer user,
-        List<Streamer> onlineUsers,
-        List<Streamer> offlineUsers,
-        List<Streamer> unchangedUsers,
-        List<Streamer> mediaRefreshUsers)
+        TwitchStreamer user,
+        List<TwitchStreamer> onlineUsers,
+        List<TwitchStreamer> offlineUsers,
+        List<TwitchStreamer> unchangedUsers,
+        List<TwitchStreamer> mediaRefreshUsers)
     {
         bool isOnline = user.StreamData != null;
         var now = DateTime.UtcNow;
@@ -266,7 +266,7 @@ public class NowLiveService(
             return UserManagementResult.NotFound;
         }
 
-        var streamer = new Streamer
+        var twitchStreamer = new TwitchStreamer
         {
             UserData = user,
             StreamData = null,
@@ -274,11 +274,11 @@ public class NowLiveService(
             NextMediaRefresh = null
         };
 
-        if (_users.TryAdd(user.Id, streamer))
+        if (_users.TryAdd(user.Id, twitchStreamer))
         {
             UserAdded?.Invoke(this, new UsersEventArguments 
             { 
-                Users = [streamer], 
+                Users = [twitchStreamer], 
                 CancellationToken = cancellationToken 
             });
             

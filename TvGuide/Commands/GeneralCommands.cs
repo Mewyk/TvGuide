@@ -12,11 +12,11 @@ namespace TvGuide.Commands;
 
 [DynamicSlashCommand("CommandAddLiveUser")]
 public sealed class TvGuideCommandsModule(
-    INowStreamingService nowStreamingService,
+    INowLiveService nowLiveService,
     IOptions<Configuration> settings
 ) : ApplicationCommandModule<ApplicationCommandContext>
 {
-    private readonly INowStreamingService _nowStreamingService = nowStreamingService;
+    private readonly INowLiveService _nowLiveService = nowLiveService;
     private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly Settings.NowLiveCommands _settings = settings.Value.NowLive.NowLiveCommands;
 
@@ -29,7 +29,7 @@ public sealed class TvGuideCommandsModule(
     [DynamicSubSlashCommand("SubCommandAddLiveUser")]
     public async Task<InteractionMessageProperties> AddStreamerCommand(
         [DynamicSlashCommandParameter("CommandParametersAddLiveUser")] string username)
-        => await _nowStreamingService
+        => await _nowLiveService
             .AddUserAsync(username, CancellationToken.None)
             .ConfigureAwait(false) 
             switch
@@ -44,7 +44,7 @@ public sealed class TvGuideCommandsModule(
     [DynamicSubSlashCommand("SubCommandRemoveLiveUser")]
     public async Task<InteractionMessageProperties> RemoveStreamerCommand(
         [DynamicSlashCommandParameter("CommandParametersRemoveLiveUser")] string username)
-        => await _nowStreamingService
+        => await _nowLiveService
             .RemoveUserAsync(username, CancellationToken.None)
             .ConfigureAwait(false)
             switch

@@ -26,7 +26,7 @@ public interface IStreamsModule
         CancellationToken cancellationToken = default);
 }
 
-public interface INowStreamingService
+public interface INowLiveService
 {
     Task<UserManagementResult> AddUserAsync(
         string userLogin, 

@@ -137,7 +137,7 @@ public enum UserManagementResult
     Error = 3
 }
 
-public class Streamer
+public class TwitchStreamer
 {
     public required TwitchUser UserData { get; set; }
     public required TwitchStream? StreamData { get; set; }

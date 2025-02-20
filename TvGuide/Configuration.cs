@@ -15,9 +15,9 @@ public class Configuration
     public required string ApplicationVersion { get; set; } = GetApplicationVersion;
 
     public static string GetApplicationVersion => Assembly
-            .GetExecutingAssembly()
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion.Split('+')[0] ?? "0.0.0";
+        .GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion.Split('+')[0] ?? "0.0.0";
 
     public static string GetApplicationName => Assembly
         .GetExecutingAssembly().GetName().Name ?? "TvGuide";
@@ -59,8 +59,8 @@ public class Settings
         public ulong GuildId { get; set; }
         public ulong ChannelId { get; set; }
 
-        public string UserDataFile { get; init; } = "NowStreamingUserData.json";
-        public string ActiveStreamsFile { get; init; } = "ActiveStreamsData.json";
+        public string UserDataFile { get; init; } = "NowLiveUserData.json";
+        public string ActiveBroadcastsFile { get; init; } = "ActiveBroadcasts.json";
 
         public int UpdateInterval { get; set; } = 60;
         public int MediaRefreshInterval { get; set; } = 6;

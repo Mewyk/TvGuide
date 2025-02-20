@@ -30,10 +30,10 @@ builder.Services
 
 builder.Services
     .AddSingleton<IAuthenticationModule, AuthenticationModule>()
-    .AddSingleton<INowStreamingService, NowLiveService>()
+    .AddSingleton<INowLiveService, NowLiveService>()
     .AddSingleton<DataModule>()
-    .AddSingleton<ActiveStreamsModule>()
-    .AddSingleton<NowLiveStates>();
+    .AddSingleton<ActiveBroadcastsModule>()
+    .AddSingleton<BroadcastStates>();
 
 builder.Services
     .AddScoped<IStreamsModule, StreamsModule>()

@@ -18,40 +18,40 @@ public sealed class ActiveBroadcastsModule(
     private readonly string _applicationName = settings.Value.ApplicationName;
     private readonly string _applicationVersion = settings.Value.ApplicationVersion;
     private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
-    private ActiveStream _activeStreams = new();
+    private Broadcasts _activeBroadcasts = new();
 
     public async Task LoadDataAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!File.Exists(_settings.ActiveStreamsFile))
+            if (!File.Exists(_settings.ActiveBroadcastsFile))
             {
-                _activeStreams = new();
+                _activeBroadcasts = new();
                 _logger.LogInformation(
                     "{LogMessage} ({Data})",
                     _logMessages.Errors.FileNotFound,
-                    _settings.ActiveStreamsFile);
+                    _settings.ActiveBroadcastsFile);
                 return;
             }
 
-            await using var fileStream = File.OpenRead(_settings.ActiveStreamsFile);
+            await using var fileStream = File.OpenRead(_settings.ActiveBroadcastsFile);
             if (fileStream.Length == 0)
             {
-                _activeStreams = new();
+                _activeBroadcasts = new();
                 return;
             }
 
-            _activeStreams = await JsonSerializer
-                .DeserializeAsync<ActiveStream>(fileStream, cancellationToken: cancellationToken)
+            _activeBroadcasts = await JsonSerializer
+                .DeserializeAsync<Broadcasts>(fileStream, cancellationToken: cancellationToken)
                 .ConfigureAwait(false) ?? new();
 
-            _activeStreams.Messages ??= [];
+            _activeBroadcasts.Messages ??= [];
 
             _logger.LogInformation(
                 "{LogMessage} ({Data})",
                 _logMessages.DataWasLoaded,
-                _settings.ActiveStreamsFile);
+                _settings.ActiveBroadcastsFile);
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
         catch (Exception exception)
@@ -60,8 +60,8 @@ public sealed class ActiveBroadcastsModule(
                 exception,
                 "{LogMessage} ({Data})",
                 _logMessages.Errors.DataWasNotLoaded,
-                _settings.ActiveStreamsFile);
-            _activeStreams = new();
+                _settings.ActiveBroadcastsFile);
+            _activeBroadcasts = new();
         }
         finally { _semaphore.Release(); }
     }
@@ -70,10 +70,10 @@ public sealed class ActiveBroadcastsModule(
     {
         try
         {
-            await using var fileStream = File.Create(_settings.ActiveStreamsFile);
+            await using var fileStream = File.Create(_settings.ActiveBroadcastsFile);
             await JsonSerializer.SerializeAsync(
                 fileStream,
-                _activeStreams,
+                _activeBroadcasts,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -82,40 +82,40 @@ public sealed class ActiveBroadcastsModule(
                 exception,
                 "{LogMessage} ({Data})",
                 _logMessages.Errors.JsonWasNotProcessed,
-                _settings.ActiveStreamsFile);
+                _settings.ActiveBroadcastsFile);
             throw;
         }
     }
 
-    public async Task ProcessOnlineStateAsync(Streamer streamer, CancellationToken cancellationToken)
+    public async Task ProcessOnlineStateAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            foreach (var existingMessage in _activeStreams.Messages)
+            foreach (var existingMessage in _activeBroadcasts.Messages)
                 existingMessage.Position += 1;
 
-            var newUserMessage = new ActiveStream.Message
+            var newUserMessage = new Broadcasts.Message
             {
-                Id = _activeStreams.SummaryMessageId,
+                Id = _activeBroadcasts.SummaryMessageId,
                 Position = 1,
-                UserData = streamer.UserData,
-                StreamData = streamer.StreamData
-                    ?? throw new ArgumentNullException(nameof(streamer)),
-                UserEmbed = CreateStreamerEmbed(streamer)
+                UserData = twitchStreamer.UserData,
+                StreamData = twitchStreamer.StreamData
+                    ?? throw new ArgumentNullException(nameof(twitchStreamer)),
+                UserEmbed = CreateStreamerEmbed(twitchStreamer)
             };
 
             await _restClient.ModifyMessageAsync(
                 _settings.ChannelId,
-                _activeStreams.SummaryMessageId,
+                _activeBroadcasts.SummaryMessageId,
                 message => message
                     .WithContent(string.Empty)
                     .AddEmbeds(newUserMessage.UserEmbed),
                 cancellationToken: cancellationToken);
 
-            _activeStreams.Messages.Add(newUserMessage);
+            _activeBroadcasts.Messages.Add(newUserMessage);
 
-            _activeStreams.SummaryMessageId = (await _restClient.SendMessageAsync(
+            _activeBroadcasts.SummaryMessageId = (await _restClient.SendMessageAsync(
                 _settings.ChannelId,
                 new MessageProperties().WithContent(CreateSummaryContent()),
                 cancellationToken: cancellationToken)).Id;
@@ -125,18 +125,18 @@ public sealed class ActiveBroadcastsModule(
         {
             _logger.LogError(
                 exception,
-                "{LogMessage} ({Data})", _logMessages.Errors.Default, streamer.UserData.Id);
+                "{LogMessage} ({Data})", _logMessages.Errors.Default, twitchStreamer.UserData.Id);
         }
         finally { _semaphore.Release(); }
     }
 
-    public async Task ProcessOfflineStateAsync(Streamer streamer, CancellationToken cancellationToken)
+    public async Task ProcessOfflineStateAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
 
-        var userMessage = _activeStreams.Messages
+        var userMessage = _activeBroadcasts.Messages
             .FirstOrDefault(
-                message => message.UserData.Id == streamer.UserData.Id);
+                message => message.UserData.Id == twitchStreamer.UserData.Id);
 
         // Skip the process if user not found (IsLive should already be marked as false)
         // TODO: Revisit the logic leading to this issue
@@ -144,7 +144,7 @@ public sealed class ActiveBroadcastsModule(
         {
             _logger.LogError(
                 "Error with user {DisplayName} ({Id})", 
-                streamer.UserData.DisplayName, streamer.UserData.Id);
+                twitchStreamer.UserData.DisplayName, twitchStreamer.UserData.Id);
             return;
         }
 
@@ -153,7 +153,7 @@ public sealed class ActiveBroadcastsModule(
 
         try
         {
-            var lastPosition = _activeStreams.Messages.Max(message => message.Position);
+            var lastPosition = _activeBroadcasts.Messages.Max(message => message.Position);
             userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage);
 
             if (userMessage.Position == lastPosition)
@@ -163,13 +163,13 @@ public sealed class ActiveBroadcastsModule(
                     message => message.AddEmbeds(userMessage.UserEmbed),
                     cancellationToken: cancellationToken);
 
-                _activeStreams.Messages.Remove(userMessage);
+                _activeBroadcasts.Messages.Remove(userMessage);
             }
             else
             {
                 // Find the oldest embed and swap places with
                 // the offline user to readjust positions
-                var oldestMessage = _activeStreams.Messages
+                var oldestMessage = _activeBroadcasts.Messages
                     .First(message => message.Position == lastPosition);
 
                 // Swap current embed UserData/UserEmbed/StreamData with the last embed
@@ -189,8 +189,8 @@ public sealed class ActiveBroadcastsModule(
                     message => message.AddEmbeds(oldestMessage.UserEmbed),
                     cancellationToken: cancellationToken);
 
-                // Removed the embed from the active streams list
-                _activeStreams.Messages.Remove(oldestMessage);
+                // Removed the embed from the active broadcasts list
+                _activeBroadcasts.Messages.Remove(oldestMessage);
             }
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
@@ -199,7 +199,7 @@ public sealed class ActiveBroadcastsModule(
             _logger.LogWarning("Message for the user does not exist (Skipping)"); // TODO: LogMessage
 
             // Cleanup the entry of the user
-            if (!_activeStreams.Messages.Remove(userMessage))
+            if (!_activeBroadcasts.Messages.Remove(userMessage))
                 throw;
         }
         catch (Exception exception)
@@ -211,24 +211,24 @@ public sealed class ActiveBroadcastsModule(
     }
 
     public async Task ProcessUnchangedStateAsync(
-        Streamer streamer,
+        TwitchStreamer twitchStreamer,
         CancellationToken cancellationToken,
         bool refreshMedia = false)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            var userMessage = _activeStreams.Messages
-                .FirstOrDefault(message => message.UserData.Id == streamer.UserData.Id)
+            var userMessage = _activeBroadcasts.Messages
+                .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)
                 ?? throw new InvalidOperationException(_logMessages.Errors.UserWasNotFound);
 
             // TODO: Add an adjustment process to log and recover (re-create) the embed
-            if (userMessage.UserEmbed is null || streamer.UserData is null || streamer.StreamData is null)
+            if (userMessage.UserEmbed is null || twitchStreamer.UserData is null || twitchStreamer.StreamData is null)
                 throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
 
-            userMessage.UserData = streamer.UserData;
-            userMessage.StreamData = streamer.StreamData;
-            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage, streamer.IsLive);
+            userMessage.UserData = twitchStreamer.UserData;
+            userMessage.StreamData = twitchStreamer.StreamData;
+            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage, twitchStreamer.IsLive);
 
             // Only set the media if it has changed
             if (refreshMedia)
@@ -256,10 +256,10 @@ public sealed class ActiveBroadcastsModule(
             var messageProperties = new MessageProperties()
                 .WithContent(CreateSummaryContent());
 
-            var summaryMessage = _activeStreams.SummaryMessageId != 0
+            var summaryMessage = _activeBroadcasts.SummaryMessageId != 0
                 ? await _restClient.ModifyMessageAsync(
                     _settings.ChannelId,
-                    _activeStreams.SummaryMessageId,
+                    _activeBroadcasts.SummaryMessageId,
                     message => message.WithContent(CreateSummaryContent()),
                     cancellationToken: cancellationToken)
                 : await _restClient.SendMessageAsync(
@@ -267,7 +267,7 @@ public sealed class ActiveBroadcastsModule(
                     messageProperties,
                     cancellationToken: cancellationToken);
 
-            _activeStreams.SummaryMessageId = summaryMessage.Id;
+            _activeBroadcasts.SummaryMessageId = summaryMessage.Id;
             _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
@@ -281,7 +281,7 @@ public sealed class ActiveBroadcastsModule(
                 new MessageProperties().WithContent(CreateSummaryContent()),
                 cancellationToken: cancellationToken);
 
-            _activeStreams.SummaryMessageId = newMessage.Id;
+            _activeBroadcasts.SummaryMessageId = newMessage.Id;
             _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasCreated);
         }
         catch (Exception exception)
@@ -292,16 +292,16 @@ public sealed class ActiveBroadcastsModule(
                 _logMessages.Errors.SummaryWasNotUpdated);
 
             // TODO: Search messages for last message that matches the summary format
-            if (_activeStreams.SummaryMessageId == 0)
+            if (_activeBroadcasts.SummaryMessageId == 0)
             {
                 var fallbackMessage = await _restClient.SendMessageAsync(
                     _settings.ChannelId,
                     new MessageProperties().WithContent(CreateSummaryContent()),
                     cancellationToken: cancellationToken);
 
-                _activeStreams.SummaryMessageId = fallbackMessage.Id;
+                _activeBroadcasts.SummaryMessageId = fallbackMessage.Id;
 
-                if (_activeStreams.SummaryMessageId != 0)
+                if (_activeBroadcasts.SummaryMessageId != 0)
                     _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
                 else throw;
             }
@@ -312,16 +312,16 @@ public sealed class ActiveBroadcastsModule(
     // TODO: Expand this further once other media features are added
     public static void RefreshMedia(
         EmbedProperties embed, 
-        ActiveStream.Message message)
+        Broadcasts.Message message)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var url = $"https://www.twitch.tv/{message.StreamData.UserName}?{timestamp}";
         embed.WithUrl(url);
     }
 
-    public bool HasEmbed(Streamer streamer) => 
-        _activeStreams.Messages
-            .FirstOrDefault(message => message.UserData.Id == streamer.UserData.Id)?
+    public bool HasEmbed(TwitchStreamer twitchStreamer) => 
+        _activeBroadcasts.Messages
+            .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)?
             .UserEmbed is not null;
 
     private EmbedProperties ApplyBaseEmbedTemplate(EmbedProperties? embed = null)
@@ -340,24 +340,24 @@ public sealed class ActiveBroadcastsModule(
         return embed;
     }
 
-    private EmbedProperties CreateStreamerEmbed(Streamer streamer)
+    private EmbedProperties CreateStreamerEmbed(TwitchStreamer twitchStreamer)
     {
-        if (streamer.StreamData is null)
-            throw new ArgumentNullException(nameof(streamer));
+        if (twitchStreamer.StreamData is null)
+            throw new ArgumentNullException(nameof(twitchStreamer));
 
         return ApplyBaseEmbedTemplate()
-            .WithTitle($"{streamer.UserData.DisplayName} is now live!") // TODO: Configurable
-            .WithDescription(streamer.StreamData.Title)
-            .WithImage(GetStreamPreviewUrl(streamer.UserData.Login))
-            .WithUrl($"https://www.twitch.tv/{streamer.UserData.Login}")
+            .WithTitle($"{twitchStreamer.UserData.DisplayName} is now live!") // TODO: Configurable
+            .WithDescription(twitchStreamer.StreamData.Title)
+            .WithImage(GetStreamPreviewUrl(twitchStreamer.UserData.Login))
+            .WithUrl($"https://www.twitch.tv/{twitchStreamer.UserData.Login}")
             .WithColor(new NetCord.Color(_settings.EmbedColor.Online))
-            .WithThumbnail(streamer.UserData.ProfileImageUrl)
-            .AddFields(CreateOnlineFields(streamer.StreamData));
+            .WithThumbnail(twitchStreamer.UserData.ProfileImageUrl)
+            .AddFields(CreateOnlineFields(twitchStreamer.StreamData));
     }
 
     private EmbedProperties UpdateEmbed(
         EmbedProperties embed, 
-        ActiveStream.Message message, 
+        Broadcasts.Message message, 
         bool isLive = false)
     {
         if (!isLive)
@@ -386,16 +386,16 @@ public sealed class ActiveBroadcastsModule(
 
     // TODO: Configurable
     private string CreateSummaryContent() =>
-        _activeStreams.Messages is null or { Count: 0 }
+        _activeBroadcasts.Messages is null or { Count: 0 }
             ? "## Active Streams\nNo streams are currently active"
             : $"""
               ## Active Streams
-              {string.Join("\n", _activeStreams.Messages
+              {string.Join("\n", _activeBroadcasts.Messages
                   .OrderBy(user => user.Position)
                   .Select(CreateUserLink))}
               """;
 
-    private string CreateUserLink(ActiveStream.Message user) =>
+    private string CreateUserLink(Broadcasts.Message user) =>
         $"- [{user.UserData.DisplayName}]" + 
         $"(https://discord.com/channels/{_settings.GuildId}/{_settings.ChannelId}/{user.Id})";
 
@@ -424,7 +424,7 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Generates a fileStream preview image url.
     /// </summary>
-    /// <param name="userLogin">The login name of the streamer.</param>
+    /// <param name="userLogin">The login name of the Twitch Streamer.</param>
     /// <param name="width">The preview image width.</param>
     /// <param name="height">The preview image height.</param>
     /// <returns>A fileStream preview image url.</returns>    
@@ -439,20 +439,20 @@ public sealed class ActiveBroadcastsModule(
             + $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
     // TODO: Convert to both online and offline states usage
-    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream streamData) =>
+    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream BroadcastData) =>
     [
         new EmbedFieldProperties()
             .WithName("Started") // TODO: Configurable
-            .WithValue($"<t:{new DateTimeOffset(streamData.StartedAt).ToUnixTimeSeconds()}:R>")
+            .WithValue($"<t:{new DateTimeOffset(BroadcastData.StartedAt).ToUnixTimeSeconds()}:R>")
             .WithInline(),
         new EmbedFieldProperties()
             .WithName("Viewers") // TODO: Configurable
-            .WithValue(streamData.ViewerCount.ToString())
+            .WithValue(BroadcastData.ViewerCount.ToString())
             .WithInline()
     ];
 }
 
-public sealed class ActiveStream
+public sealed class Broadcasts
 {
     public ulong SummaryMessageId { get; set; }
     public EmbedProperties? SummaryEmbed { get; set; }

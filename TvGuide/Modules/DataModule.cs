@@ -9,7 +9,7 @@ public class DataModule(IOptions<Configuration> settings)
     private readonly string _filePath = settings.Value.NowLive.UserDataFile;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    public async Task<List<Streamer>> LoadUsersAsync(CancellationToken cancellationToken)
+    public async Task<List<TwitchStreamer>> LoadUsersAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
@@ -19,13 +19,13 @@ public class DataModule(IOptions<Configuration> settings)
             using var stream = File.OpenRead(_filePath);
             if (stream.Length == 0) return [];
 
-            var users = await JsonSerializer.DeserializeAsync<List<Streamer>>(stream, cancellationToken: cancellationToken);
+            var users = await JsonSerializer.DeserializeAsync<List<TwitchStreamer>>(stream, cancellationToken: cancellationToken);
             return users ?? [];
         }
         finally { _semaphore.Release(); }
     }
 
-    public async Task SaveUsersAsync(IEnumerable<Streamer> users, CancellationToken cancellationToken)
+    public async Task SaveUsersAsync(IEnumerable<TwitchStreamer> users, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try

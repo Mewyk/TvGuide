@@ -24,12 +24,12 @@
       <IncludeInSingleFile>false</IncludeInSingleFile>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
-    <None Update="ActiveStreamsData.json">
+    <None Update="ActiveBroadcasts.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInSingleFile>false</IncludeInSingleFile>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
-    <None Update="NowStreamingUserData.json">
+    <None Update="NowLiveUserData.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInSingleFile>false</IncludeInSingleFile>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
