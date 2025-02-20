@@ -1,15 +1,12 @@
 using System.Net;
 using System.Text.Json;
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
 using NetCord.Rest;
 
 namespace TvGuide.Modules;
 
-// TODO: Break things down by classes for better organization and such
-public class ActiveStreamsModule(
+public sealed class ActiveStreamsModule(
     IOptions<Configuration> settings,
     ILogger<ActiveStreamsModule> logger,
     RestClient restClient)
@@ -18,34 +15,36 @@ public class ActiveStreamsModule(
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
     private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
-    private ActiveStream _activeStreams = new();
     private readonly string _applicationName = settings.Value.ApplicationName;
     private readonly string _applicationVersion = settings.Value.ApplicationVersion;
     private readonly ILogger<ActiveStreamsModule> _logger = logger;
+    private ActiveStream _activeStreams = new();
 
     public async Task LoadDataAsync(CancellationToken cancellationToken)
     {
-        await _semaphore.WaitAsync(cancellationToken);
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!File.Exists(_settings.ActiveStreamsFile))
             {
-                _activeStreams = new ActiveStream();
-                _logger.LogInformation("{LogMessage} ({Data})",
+                _activeStreams = new();
+                _logger.LogInformation(
+                    "{LogMessage} ({Data})",
                     _logMessages.Errors.FileNotFound,
                     _settings.ActiveStreamsFile);
                 return;
             }
 
-            using FileStream fileStream = File.OpenRead(_settings.ActiveStreamsFile);
+            await using var fileStream = File.OpenRead(_settings.ActiveStreamsFile);
             if (fileStream.Length == 0)
             {
-                _activeStreams = new ActiveStream();
+                _activeStreams = new();
                 return;
             }
 
-            _activeStreams = await JsonSerializer.DeserializeAsync<ActiveStream>(
-                fileStream, cancellationToken: cancellationToken) ?? new ActiveStream();
+            _activeStreams = await JsonSerializer
+                .DeserializeAsync<ActiveStream>(fileStream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false) ?? new();
 
             _activeStreams.Messages ??= [];
 
@@ -57,11 +56,12 @@ public class ActiveStreamsModule(
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
         catch (Exception exception)
         {
-            _logger.LogError(exception, 
+            _logger.LogError(
+                exception,
                 "{LogMessage} ({Data})",
-                _logMessages.Errors.DataWasNotLoaded, 
+                _logMessages.Errors.DataWasNotLoaded,
                 _settings.ActiveStreamsFile);
-            _activeStreams = new ActiveStream();
+            _activeStreams = new();
         }
         finally { _semaphore.Release(); }
     }
@@ -70,11 +70,11 @@ public class ActiveStreamsModule(
     {
         try
         {
-            using FileStream fileStream = File.Create(_settings.ActiveStreamsFile);
+            await using var fileStream = File.Create(_settings.ActiveStreamsFile);
             await JsonSerializer.SerializeAsync(
                 fileStream,
                 _activeStreams,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -85,7 +85,6 @@ public class ActiveStreamsModule(
                 _settings.ActiveStreamsFile);
             throw;
         }
-        finally { /* TODO: Do something */ }
     }
 
     public async Task ProcessOnlineStateAsync(Streamer streamer, CancellationToken cancellationToken)
@@ -224,19 +223,11 @@ public class ActiveStreamsModule(
                 ?? throw new InvalidOperationException(_logMessages.Errors.UserWasNotFound);
 
             // TODO: Add an adjustment process to log and recover (re-create) the embed
-            if (userMessage.UserEmbed == null)
+            if (userMessage.UserEmbed is null || streamer.UserData is null || streamer.StreamData is null)
                 throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
 
-            if (streamer.UserData != null)
-                userMessage.UserData = streamer.UserData;
-            else
-                throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
-
-            if (streamer.StreamData != null)
-                userMessage.StreamData = streamer.StreamData;
-            else
-                throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
-
+            userMessage.UserData = streamer.UserData;
+            userMessage.StreamData = streamer.StreamData;
             userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage, streamer.IsLive);
 
             // Only set the media if it has changed
@@ -246,8 +237,7 @@ public class ActiveStreamsModule(
             await _restClient.ModifyMessageAsync(
                 _settings.ChannelId,
                 userMessage.Id,
-                message => message
-                    .AddEmbeds(userMessage.UserEmbed),
+                message => message.AddEmbeds(userMessage.UserEmbed),
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
@@ -263,17 +253,21 @@ public class ActiveStreamsModule(
     {
         try
         {
-            _activeStreams.SummaryMessageId = _activeStreams.SummaryMessageId != 0
-                ? (await _restClient.ModifyMessageAsync(
+            var messageProperties = new MessageProperties()
+                .WithContent(CreateSummaryContent());
+
+            var summaryMessage = _activeStreams.SummaryMessageId != 0
+                ? await _restClient.ModifyMessageAsync(
                     _settings.ChannelId,
                     _activeStreams.SummaryMessageId,
                     message => message.WithContent(CreateSummaryContent()),
-                    cancellationToken: cancellationToken)).Id
-                : (await _restClient.SendMessageAsync(
+                    cancellationToken: cancellationToken)
+                : await _restClient.SendMessageAsync(
                     _settings.ChannelId,
-                    new MessageProperties().WithContent(CreateSummaryContent()),
-                    cancellationToken: cancellationToken)).Id;
+                    messageProperties,
+                    cancellationToken: cancellationToken);
 
+            _activeStreams.SummaryMessageId = summaryMessage.Id;
             _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
@@ -281,24 +275,31 @@ public class ActiveStreamsModule(
         {
             // Specific handling for 404 Not Found
             _logger.LogWarning("Existing summary message was not found"); // TODO: LogMessage
-            _activeStreams.SummaryMessageId = (await _restClient.SendMessageAsync(
+            
+            var newMessage = await _restClient.SendMessageAsync(
                 _settings.ChannelId,
                 new MessageProperties().WithContent(CreateSummaryContent()),
-                cancellationToken: cancellationToken)).Id;
+                cancellationToken: cancellationToken);
 
+            _activeStreams.SummaryMessageId = newMessage.Id;
             _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasCreated);
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "{LogMessage}", _logMessages.Errors.SummaryWasNotUpdated);
+            _logger.LogWarning(
+                exception, 
+                "{LogMessage}", 
+                _logMessages.Errors.SummaryWasNotUpdated);
 
             // TODO: Search messages for last message that matches the summary format
             if (_activeStreams.SummaryMessageId == 0)
             {
-                _activeStreams.SummaryMessageId = (await _restClient.SendMessageAsync(
+                var fallbackMessage = await _restClient.SendMessageAsync(
                     _settings.ChannelId,
                     new MessageProperties().WithContent(CreateSummaryContent()),
-                    cancellationToken: cancellationToken)).Id;
+                    cancellationToken: cancellationToken);
+
+                _activeStreams.SummaryMessageId = fallbackMessage.Id;
 
                 if (_activeStreams.SummaryMessageId != 0)
                     _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
@@ -309,18 +310,24 @@ public class ActiveStreamsModule(
     }
 
     // TODO: Expand this further once other media features are added
-    public static void RefreshMedia(EmbedProperties embed, ActiveStream.Message message) => embed.WithUrl(
-        $"https://www.twitch.tv/" +
-        $"{message.StreamData.UserName}?" +
-        $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
+    public static void RefreshMedia(
+        EmbedProperties embed, 
+        ActiveStream.Message message)
+    {
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var url = $"https://www.twitch.tv/{message.StreamData.UserName}?{timestamp}";
+        embed.WithUrl(url);
+    }
 
-    public bool HasEmbed(Streamer streamer) => _activeStreams.Messages
-        .FirstOrDefault(message => message.UserData.Id == streamer.UserData.Id)?
-        .UserEmbed != null;
+    public bool HasEmbed(Streamer streamer) => 
+        _activeStreams.Messages
+            .FirstOrDefault(message => message.UserData.Id == streamer.UserData.Id)?
+            .UserEmbed is not null;
 
     private EmbedProperties ApplyBaseEmbedTemplate(EmbedProperties? embed = null)
     {
         embed ??= new EmbedProperties();
+        
         embed.Timestamp = DateTimeOffset.UtcNow;
         embed.Author ??= new EmbedAuthorProperties();
         embed.Footer ??= new EmbedFooterProperties
@@ -333,9 +340,12 @@ public class ActiveStreamsModule(
         return embed;
     }
 
-    private EmbedProperties CreateStreamerEmbed(Streamer streamer) => streamer.StreamData == null
-        ? throw new ArgumentNullException(nameof(streamer))
-        : ApplyBaseEmbedTemplate()
+    private EmbedProperties CreateStreamerEmbed(Streamer streamer)
+    {
+        if (streamer.StreamData is null)
+            throw new ArgumentNullException(nameof(streamer));
+
+        return ApplyBaseEmbedTemplate()
             .WithTitle($"{streamer.UserData.DisplayName} is now live!") // TODO: Configurable
             .WithDescription(streamer.StreamData.Title)
             .WithImage(GetStreamPreviewUrl(streamer.UserData.Login))
@@ -343,36 +353,51 @@ public class ActiveStreamsModule(
             .WithColor(new NetCord.Color(_settings.EmbedColor.Online))
             .WithThumbnail(streamer.UserData.ProfileImageUrl)
             .AddFields(CreateOnlineFields(streamer.StreamData));
+    }
 
-    private EmbedProperties UpdateEmbed(EmbedProperties embed, ActiveStream.Message message, bool isLive = false) => 
-        !isLive
-        ? ApplyBaseEmbedTemplate(embed)
-            .WithTitle($"{message.UserData.DisplayName} finished streaming.") // TODO: Configurable
-            .WithDescription(string.Empty)
-            .WithImage(string.Empty)
-            .WithColor(new NetCord.Color(_settings.EmbedColor.Offline))
-            .WithFields(
-            [
-                new EmbedFieldProperties()
-                    .WithName("Stream Duration") // TODO: Configurable
-                    .WithValue(
-                        FormatDuration(DateTime.UtcNow - message.StreamData.StartedAt))
-                    .WithInline()
-            ])
-        : ApplyBaseEmbedTemplate(embed)
+    private EmbedProperties UpdateEmbed(
+        EmbedProperties embed, 
+        ActiveStream.Message message, 
+        bool isLive = false)
+    {
+        if (!isLive)
+        {
+            var duration = FormatDuration(DateTime.UtcNow - message.StreamData.StartedAt);
+            return ApplyBaseEmbedTemplate(embed)
+                .WithTitle($"{message.UserData.DisplayName} finished streaming.") // TODO: Configurable
+                .WithDescription(string.Empty)
+                .WithImage(string.Empty)
+                .WithColor(new NetCord.Color(_settings.EmbedColor.Offline))
+                .WithFields(
+                [
+                    new EmbedFieldProperties()
+                        .WithName("Stream Duration") // TODO: Configurable
+                        .WithValue(duration)
+                        .WithInline()
+                ]);
+        }
+
+        return ApplyBaseEmbedTemplate(embed)
             .WithDescription(message.StreamData.Title)
             .WithImage(GetStreamPreviewUrl(message.UserData.Login))
             .WithThumbnail(message.UserData.ProfileImageUrl)
             .WithFields(CreateOnlineFields(message.StreamData));
+    }
 
     // TODO: Configurable
-    private string CreateSummaryContent() => _activeStreams.Messages == null || _activeStreams.Messages.Count == 0
-        ? "## Active Streams\nNo streams are currently active"
-        : $"## Active Streams\n{string
-            .Join("\n", _activeStreams.Messages
-                .OrderBy(user => user.Position)
-                .Select(user =>
-                    $"- [{user.UserData.DisplayName}](https://discord.com/channels/{_settings.GuildId}/{_settings.ChannelId}/{user.Id})"))}";
+    private string CreateSummaryContent() =>
+        _activeStreams.Messages is null or { Count: 0 }
+            ? "## Active Streams\nNo streams are currently active"
+            : $"""
+              ## Active Streams
+              {string.Join("\n", _activeStreams.Messages
+                  .OrderBy(user => user.Position)
+                  .Select(CreateUserLink))}
+              """;
+
+    private string CreateUserLink(ActiveStream.Message user) =>
+        $"- [{user.UserData.DisplayName}]" + 
+        $"(https://discord.com/channels/{_settings.GuildId}/{_settings.ChannelId}/{user.Id})";
 
     /// <summary>
     /// Formats a TimeSpan duration into a human-readable string.
@@ -381,20 +406,19 @@ public class ActiveStreamsModule(
     /// <returns>Formatted duration string.</returns>    
     public static string FormatDuration(TimeSpan duration)
     {
-        if (duration.TotalMinutes >= 60)
-        {
-            int hours = (int)duration.TotalHours;
-            int minutes = duration.Minutes;
-            string hourText = hours == 1 ? "hour" : "hours";
-            string minuteText = minutes == 1 ? "minute" : "minutes";
-            return minutes > 0 ? $"{hours} {hourText} and {minutes} {minuteText}" : $"{hours} {hourText}";
-        }
-        else
-        {
-            int minutes = (int)duration.TotalMinutes;
-            string minuteText = minutes == 1 ? "minute" : "minutes";
-            return $"{minutes} {minuteText}";
-        }
+        static string GetLabel(int value, string singular) => 
+            $"{value} {singular}{(value == 1 ? "" : "s")}";
+
+        if (duration.TotalMinutes < 60)
+            return GetLabel((int)duration.TotalMinutes, "minute");
+
+        int hours = (int)duration.TotalHours;
+        int minutes = duration.Minutes;
+        
+        string hoursText = GetLabel(hours, "hour");
+        return minutes > 0 
+            ? $"{hoursText} and {GetLabel(minutes, "minute")}"
+            : hoursText;
     }
 
     /// <summary>
@@ -404,36 +428,37 @@ public class ActiveStreamsModule(
     /// <param name="width">The preview image width.</param>
     /// <param name="height">The preview image height.</param>
     /// <returns>A fileStream preview image url.</returns>    
-    public static string GetStreamPreviewUrl(string userLogin, int width = 1280, int height = 720)
-    {
-        var unixTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        return $"https://static-cdn.jtvnw.net/previews-ttv/live_user_{userLogin}-{width}x{height}.jpg?{unixTime}";
-    }
+    public static string GetStreamPreviewUrl(
+        string userLogin, 
+        int width = 1280, 
+        int height = 720) => 
+            $"https://static-cdn.jtvnw.net/previews-ttv/"
+            + $"live_user_{userLogin}"
+            + $"-{width}x{height}"
+            + $".jpg?"
+            + $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
     // TODO: Convert to both online and offline states usage
-    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream streamData)
-    {
-        return
-        [
-            new EmbedFieldProperties()
-                .WithName("Started") // TODO: Configurable
-                .WithValue($"<t:{new DateTimeOffset(streamData.StartedAt).ToUnixTimeSeconds()}:R>")
-                .WithInline(),
-            new EmbedFieldProperties()
-                .WithName("Viewers") // TODO: Configurable
-                .WithValue(streamData.ViewerCount.ToString())
-                .WithInline()
-        ];
-    }
+    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream streamData) =>
+    [
+        new EmbedFieldProperties()
+            .WithName("Started") // TODO: Configurable
+            .WithValue($"<t:{new DateTimeOffset(streamData.StartedAt).ToUnixTimeSeconds()}:R>")
+            .WithInline(),
+        new EmbedFieldProperties()
+            .WithName("Viewers") // TODO: Configurable
+            .WithValue(streamData.ViewerCount.ToString())
+            .WithInline()
+    ];
 }
 
-public class ActiveStream
+public sealed class ActiveStream
 {
     public ulong SummaryMessageId { get; set; }
     public EmbedProperties? SummaryEmbed { get; set; }
     public List<Message> Messages { get; set; } = [];
 
-    public class Message
+    public sealed class Message
     {
         public required ulong Id { get; set; }
         public required int Position { get; set; }

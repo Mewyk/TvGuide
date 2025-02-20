@@ -15,8 +15,8 @@ public class NowLiveService(
     IUsersModule usersModule,
     IOptions<Configuration> settings,
     ILogger<NowLiveService> logger,
-    NowLiveStates streamState)
-    : BackgroundService, INowStreamingService
+    NowLiveStates streamState
+) : BackgroundService, INowStreamingService
 {
     private readonly IStreamsModule _streamService = streamsModule;
     private readonly IUsersModule _usersModule = usersModule;

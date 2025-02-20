@@ -9,6 +9,7 @@ using NetCord.Hosting.Gateway;
 using NetCord.Hosting.Services;
 using NetCord.Hosting.Services.ApplicationCommands;
 using NetCord.Services.ApplicationCommands;
+
 using TvGuide;
 using TvGuide.Events;
 using TvGuide.Modules;
