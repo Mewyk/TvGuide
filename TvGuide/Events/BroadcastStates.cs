@@ -5,69 +5,69 @@ using TvGuide.Modules;
 
 namespace TvGuide.Events;
 
-public class NowLiveStates(
-    ILogger<NowLiveStates> logger,
+public class BroadcastStates(
+    ILogger<BroadcastStates> logger,
     IOptions<Configuration> settings,
-    ActiveStreamsModule activeStreamsModule)
+    ActiveBroadcastsModule activeBroadcastsModule)
 {
-    private readonly ILogger<NowLiveStates> _logger = logger;
+    private readonly ILogger<BroadcastStates> _logger = logger;
     private readonly LogMessages _logMessages = settings.Value.LogMessages;
-    private readonly ActiveStreamsModule _nowStreaming = activeStreamsModule;
+    private readonly ActiveBroadcastsModule _activeBroadcasts = activeBroadcastsModule;
 
-    public async void OnStreamStateOnline(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastStateOnline(object? sender, UsersEventArguments eventData)
     {
         _logger.LogDebug("{LogMessage} (Total: {Data})", _logMessages.StreamIsOnline, eventData.Users.Count);
         var tasks = eventData.Users.Select(user =>
-            _nowStreaming.ProcessOnlineStateAsync(user, eventData.CancellationToken));
+            _activeBroadcasts.ProcessOnlineStateAsync(user, eventData.CancellationToken));
 
         await Task.WhenAll(tasks);
 
-        await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
     }
 
-    public async void OnStreamStateOffline(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastStateOffline(object? sender, UsersEventArguments eventData)
     {
         _logger.LogDebug("{LogMessage} (Total: {Data})", _logMessages.StreamIsOffline, eventData.Users.Count);
         var tasks = eventData.Users.Select(user =>
-            _nowStreaming.ProcessOfflineStateAsync(user, eventData.CancellationToken));
+            _activeBroadcasts.ProcessOfflineStateAsync(user, eventData.CancellationToken));
 
         await Task.WhenAll(tasks);
 
-        await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
     }
 
-    public async void OnStreamStateMediaRefresh(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastStateMediaRefresh(object? sender, UsersEventArguments eventData)
     {
         _logger.LogDebug("{LogMessage} (Total: {Data})", _logMessages.StreamMediaWasRefreshed, eventData.Users.Count);
         var tasks = eventData.Users.Select(user => 
-                !_nowStreaming.HasEmbed(user)
-                ? _nowStreaming.ProcessOnlineStateAsync(user, eventData.CancellationToken)
-                : _nowStreaming.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
+            ! _activeBroadcasts.HasEmbed(user)
+            ? _activeBroadcasts.ProcessOnlineStateAsync(user, eventData.CancellationToken)
+            : _activeBroadcasts.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
 
         await Task.WhenAll(tasks);
 
-        await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
     }
 
     public async void OnServiceStarting(object? sender, ServiceEventArguments eventData)
     {
-        await _nowStreaming.LoadDataAsync(eventData.CancellationToken);
-        await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        await _activeBroadcasts.LoadDataAsync(eventData.CancellationToken);
+        await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
     }
 
     public async void OnServiceExiting(object? sender, ServiceEventArguments eventData) 
-        => await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        => await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
 
-    public async void OnStreamStateUnchanged(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastStateUnchanged(object? sender, UsersEventArguments eventData)
     {
         var tasks = eventData.Users.Select(user =>
-            !_nowStreaming.HasEmbed(user)
-            ? _nowStreaming.ProcessOnlineStateAsync(user, eventData.CancellationToken)
-            : _nowStreaming.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
+            ! _activeBroadcasts.HasEmbed(user)
+            ? _activeBroadcasts.ProcessOnlineStateAsync(user, eventData.CancellationToken)
+            : _activeBroadcasts.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
 
         await Task.WhenAll(tasks);
 
-        await _nowStreaming.UpdateSummaryAsync(eventData.CancellationToken);
+        await _activeBroadcasts.UpdateSummaryAsync(eventData.CancellationToken);
         
         _logger.LogDebug("{LogMessage} (Total: {Data})", _logMessages.StreamIsUnchanged, eventData.Users.Count);
     }
@@ -99,7 +99,7 @@ public class ServiceEventArguments : EventArgs
 
 public class UsersEventArguments : EventArgs
 {
-    public List<Streamer> Users { get; set; } = [];
+    public List<TwitchStreamer> Users { get; set; } = [];
     public required CancellationToken CancellationToken { get; init; }
 }
 
