@@ -53,24 +53,14 @@ public class NowLiveService(
         try
         {
             _logger.LogInformation("Starting");
-
-            BroadcastStateOnline += _broadcastState.OnBroadcastStateOnline;
-            BroadcastStateOffline += _broadcastState.OnBroadcastStateOffline;
-            BroadcastStateUnchanged += _broadcastState.OnBroadcastStateUnchanged;
-            BroadcastStateMediaRefresh += _broadcastState.OnBroadcastStateMediaRefresh;
-
-            UserAdded += _broadcastState.OnUserAdded;
-            UserRemoved += _broadcastState.OnUserRemoved;
-
-            UserBroadcastError += _broadcastState.OnUserStreamError;
-            ServiceStarting += _broadcastState.OnServiceStarting;
-            ServiceStarted += _broadcastState.OnServiceStarted;
-            ServiceExiting += _broadcastState.OnServiceExiting;
-            ServiceExited += _broadcastState.OnServiceExited;
+            
+            RegisterEventHandlers();
 
             //TODO: Make better use of the Starting vs Started
-            ServiceStarting?.Invoke(this, 
-                new ServiceEventArguments { CancellationToken = cancellationToken });
+            ServiceStarting?.Invoke(this, new ServiceEventArguments 
+            { 
+                CancellationToken = cancellationToken 
+            });
 
             await LoadUsersAsync(cancellationToken);
 
@@ -81,32 +71,57 @@ public class NowLiveService(
         {
             _logger.LogInformation("Exiting");
 
-            ServiceExiting?.Invoke(this, 
-                new ServiceEventArguments { CancellationToken = cancellationToken });
+            ServiceExiting?.Invoke(this, new ServiceEventArguments 
+            { 
+                CancellationToken = cancellationToken 
+            });
 
             await _data.SaveUsersAsync(_users.Values, CancellationToken.None);
-
-            BroadcastStateOnline -= _broadcastState.OnBroadcastStateOnline;
-            BroadcastStateOffline -= _broadcastState.OnBroadcastStateOffline;
-            BroadcastStateUnchanged -= _broadcastState.OnBroadcastStateUnchanged;
-            BroadcastStateMediaRefresh -= _broadcastState.OnBroadcastStateMediaRefresh;
-
-            UserAdded -= _broadcastState.OnUserAdded;
-            UserRemoved -= _broadcastState.OnUserRemoved;
-
-            UserBroadcastError -= _broadcastState.OnUserStreamError;
-            ServiceStarting -= _broadcastState.OnServiceStarting;
-            ServiceStarted -= _broadcastState.OnServiceStarted;
-            ServiceExiting -= _broadcastState.OnServiceExiting;
-            ServiceExited -= _broadcastState.OnServiceExited;
+            UnregisterEventHandlers();
         }
         finally
         {
             _logger.LogInformation("Exited");
 
-            ServiceExited?.Invoke(this, 
-                new ServiceEventArguments { CancellationToken = CancellationToken.None });
+            ServiceExited?.Invoke(this, new ServiceEventArguments 
+            { 
+                CancellationToken = CancellationToken.None 
+            });
         }
+    }
+
+    private void RegisterEventHandlers()
+    {
+        BroadcastStateOnline += _broadcastState.OnBroadcastStateOnline;
+        BroadcastStateOffline += _broadcastState.OnBroadcastStateOffline;
+        BroadcastStateUnchanged += _broadcastState.OnBroadcastStateUnchanged;
+        BroadcastStateMediaRefresh += _broadcastState.OnBroadcastStateMediaRefresh;
+
+        UserAdded += _broadcastState.OnUserAdded;
+        UserRemoved += _broadcastState.OnUserRemoved;
+        UserBroadcastError += _broadcastState.OnUserStreamError;
+
+        ServiceStarting += _broadcastState.OnServiceStarting;
+        ServiceStarted += _broadcastState.OnServiceStarted;
+        ServiceExiting += _broadcastState.OnServiceExiting;
+        ServiceExited += _broadcastState.OnServiceExited;
+    }
+
+    private void UnregisterEventHandlers()
+    {
+        BroadcastStateOnline -= _broadcastState.OnBroadcastStateOnline;
+        BroadcastStateOffline -= _broadcastState.OnBroadcastStateOffline;
+        BroadcastStateUnchanged -= _broadcastState.OnBroadcastStateUnchanged;
+        BroadcastStateMediaRefresh -= _broadcastState.OnBroadcastStateMediaRefresh;
+
+        UserAdded -= _broadcastState.OnUserAdded;
+        UserRemoved -= _broadcastState.OnUserRemoved;
+        UserBroadcastError -= _broadcastState.OnUserStreamError;
+
+        ServiceStarting -= _broadcastState.OnServiceStarting;
+        ServiceStarted -= _broadcastState.OnServiceStarted;
+        ServiceExiting -= _broadcastState.OnServiceExiting;
+        ServiceExited -= _broadcastState.OnServiceExited;
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
@@ -303,8 +318,9 @@ public class NowLiveService(
         CancellationToken cancellationToken)
     {
         var userId = _users.Values
-            .FirstOrDefault(user => user.UserData.Login.Equals(
-                userLogin, StringComparison.OrdinalIgnoreCase))?.UserData.Id;
+            .FirstOrDefault(user => 
+                user.UserData.Login.Equals(userLogin, StringComparison.OrdinalIgnoreCase))
+            ?.UserData.Id;
 
         if (userId == null)
         {
@@ -325,18 +341,15 @@ public class NowLiveService(
             });
 
             await _data.SaveUsersAsync(_users.Values, cancellationToken);
-
             return UserManagementResult.Success;
         }
-        else
-        {
-            _logger.LogError(
-                "{LogMessage} ({Data})", 
-                _logMessages.Errors.UserWasNotRemoved, 
-                userId);
 
-            return UserManagementResult.Error;
-        }
+        _logger.LogError(
+            "{LogMessage} ({Data})", 
+            _logMessages.Errors.UserWasNotRemoved, 
+            userId);
+
+        return UserManagementResult.Error;
     }
 
     private async Task LoadUsersAsync(CancellationToken cancellationToken)
