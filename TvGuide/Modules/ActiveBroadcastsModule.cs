@@ -6,9 +6,9 @@ using NetCord.Rest;
 
 namespace TvGuide.Modules;
 
-public sealed class ActiveStreamsModule(
+public sealed class ActiveBroadcastsModule(
     IOptions<Configuration> settings,
-    ILogger<ActiveStreamsModule> logger,
+    ILogger<ActiveBroadcastsModule> logger,
     RestClient restClient)
 {
     private readonly RestClient _restClient = restClient;
@@ -17,7 +17,7 @@ public sealed class ActiveStreamsModule(
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private readonly string _applicationName = settings.Value.ApplicationName;
     private readonly string _applicationVersion = settings.Value.ApplicationVersion;
-    private readonly ILogger<ActiveStreamsModule> _logger = logger;
+    private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
     private ActiveStream _activeStreams = new();
 
     public async Task LoadDataAsync(CancellationToken cancellationToken)
