@@ -40,7 +40,7 @@ public class BroadcastStates(
     {
         _logger.LogDebug("{LogMessage} (Total: {Data})", _logMessages.StreamMediaWasRefreshed, eventData.Users.Count);
         var tasks = eventData.Users.Select(user => 
-            ! _activeBroadcasts.HasEmbed(user)
+            ! _activeBroadcasts.HasContainer(user)
             ? _activeBroadcasts.ProcessOnlineStateAsync(user, eventData.CancellationToken)
             : _activeBroadcasts.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
 
@@ -61,7 +61,7 @@ public class BroadcastStates(
     public async void OnBroadcastStateUnchanged(object? sender, UsersEventArguments eventData)
     {
         var tasks = eventData.Users.Select(user =>
-            ! _activeBroadcasts.HasEmbed(user)
+            ! _activeBroadcasts.HasContainer(user)
             ? _activeBroadcasts.ProcessOnlineStateAsync(user, eventData.CancellationToken)
             : _activeBroadcasts.ProcessUnchangedStateAsync(user, eventData.CancellationToken, true));
 

@@ -104,7 +104,7 @@ public sealed class ActiveBroadcastsModule(
                 UserData = twitchStreamer.UserData,
                 StreamData = twitchStreamer.StreamData
                     ?? throw new ArgumentNullException(nameof(twitchStreamer)),
-                UserEmbed = CreateStreamerEmbed(twitchStreamer)
+                BroadcastContainer = CreateBroadcastContainer(twitchStreamer)
             };
 
             await _restClient.ModifyMessageAsync(
@@ -112,7 +112,7 @@ public sealed class ActiveBroadcastsModule(
                 _activeBroadcasts.SummaryMessageId,
                 message => message
                     .WithContent(string.Empty)
-                    .AddEmbeds(newUserMessage.UserEmbed),
+                    .AddEmbeds(newUserMessage.BroadcastContainer),
                 cancellationToken: cancellationToken);
 
             _activeBroadcasts.Messages.Add(newUserMessage);
@@ -150,48 +150,48 @@ public sealed class ActiveBroadcastsModule(
             return;
         }
 
-        if (userMessage.UserEmbed == null)
-            throw new InvalidOperationException("UserEmbed can not be null"); // TODO: LogMessage
+        if (userMessage.BroadcastContainer == null)
+            throw new InvalidOperationException("BroadcastContainer can not be null"); // TODO: LogMessage
 
         try
         {
             var lastPosition = _activeBroadcasts.Messages.Max(message => message.Position);
-            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage);
+            userMessage.BroadcastContainer = UpdateContainer(userMessage.BroadcastContainer, userMessage);
 
             if (userMessage.Position == lastPosition)
             {
                 await _restClient.ModifyMessageAsync(
                     _settings.ChannelId, userMessage.Id,
-                    message => message.AddEmbeds(userMessage.UserEmbed),
+                    message => message.AddEmbeds(userMessage.BroadcastContainer),
                     cancellationToken: cancellationToken);
 
                 _activeBroadcasts.Messages.Remove(userMessage);
             }
             else
             {
-                // Find the oldest embed and swap places with
+                // Find the oldest container and swap places with
                 // the offline user to readjust positions
                 var oldestMessage = _activeBroadcasts.Messages
                     .First(message => message.Position == lastPosition);
 
-                // Swap current embed UserData/UserEmbed/StreamData with the last embed
+                // Swap current container UserData/BroadcastContainer/StreamData with the last container
                 (oldestMessage.UserData, userMessage.UserData) = (userMessage.UserData, oldestMessage.UserData);
                 (oldestMessage.StreamData, userMessage.StreamData) = (userMessage.StreamData, oldestMessage.StreamData);
-                (oldestMessage.UserEmbed, userMessage.UserEmbed) = (userMessage.UserEmbed, oldestMessage.UserEmbed);
+                (oldestMessage.BroadcastContainer, userMessage.BroadcastContainer) = (userMessage.BroadcastContainer, oldestMessage.BroadcastContainer);
 
-                // Update the embed of the online user
+                // Update the container of the online user
                 await _restClient.ModifyMessageAsync(
                     _settings.ChannelId, userMessage.Id,
-                    message => message.AddEmbeds(userMessage.UserEmbed),
+                    message => message.AddEmbeds(userMessage.BroadcastContainer),
                     cancellationToken: cancellationToken);
 
-                // Update the embed of the offline user
+                // Update the container of the offline user
                 await _restClient.ModifyMessageAsync(
                     _settings.ChannelId, oldestMessage.Id,
-                    message => message.AddEmbeds(oldestMessage.UserEmbed),
+                    message => message.AddEmbeds(oldestMessage.BroadcastContainer),
                     cancellationToken: cancellationToken);
 
-                // Removed the embed from the active broadcasts list
+                // Removed the container from the active broadcasts list
                 _activeBroadcasts.Messages.Remove(oldestMessage);
             }
         }
@@ -224,22 +224,22 @@ public sealed class ActiveBroadcastsModule(
                 .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)
                 ?? throw new InvalidOperationException(_logMessages.Errors.UserWasNotFound);
 
-            // TODO: Add an adjustment process to log and recover (re-create) the embed
-            if (userMessage.UserEmbed is null || twitchStreamer.UserData is null || twitchStreamer.StreamData is null)
+            // TODO: Add an adjustment process to log and recover (re-create) the container
+            if (userMessage.BroadcastContainer is null || twitchStreamer.UserData is null || twitchStreamer.StreamData is null)
                 throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
 
             userMessage.UserData = twitchStreamer.UserData;
             userMessage.StreamData = twitchStreamer.StreamData;
-            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage, twitchStreamer.IsLive);
+            userMessage.BroadcastContainer = UpdateContainer(userMessage.BroadcastContainer, userMessage, twitchStreamer.IsLive);
 
             // Only set the media if it has changed
             if (refreshMedia)
-                RefreshMedia(userMessage.UserEmbed, userMessage);
+                RefreshMedia(userMessage.BroadcastContainer, userMessage);
 
             await _restClient.ModifyMessageAsync(
                 _settings.ChannelId,
                 userMessage.Id,
-                message => message.AddEmbeds(userMessage.UserEmbed),
+                message => message.AddEmbeds(userMessage.BroadcastContainer),
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
@@ -313,59 +313,59 @@ public sealed class ActiveBroadcastsModule(
 
     // TODO: Expand this further once other media features are added
     public static void RefreshMedia(
-        EmbedProperties embed, 
+        EmbedProperties container, 
         Broadcasts.Message message)
     {
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var url = $"https://www.twitch.tv/{message.StreamData.UserName}?{timestamp}";
-        embed.WithUrl(url);
+        container.WithUrl(url);
     }
 
-    public bool HasEmbed(TwitchStreamer twitchStreamer) => 
+    public bool HasContainer(TwitchStreamer twitchStreamer) => 
         _activeBroadcasts.Messages
             .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)?
-            .UserEmbed is not null;
+            .BroadcastContainer is not null;
 
-    private EmbedProperties ApplyBaseEmbedTemplate(EmbedProperties? embed = null)
+    private EmbedProperties ApplyBaseContainerTemplate(EmbedProperties? container = null)
     {
-        embed ??= new EmbedProperties();
+        container ??= new EmbedProperties();
         
-        embed.Timestamp = DateTimeOffset.UtcNow;
-        embed.Author ??= new EmbedAuthorProperties();
-        embed.Footer ??= new EmbedFooterProperties
+        container.Timestamp = DateTimeOffset.UtcNow;
+        container.Author ??= new EmbedAuthorProperties();
+        container.Footer ??= new EmbedFooterProperties
         {
             Text = $"{_applicationName} v{_applicationVersion}",
             IconUrl = _settings.FooterIcon ?? string.Empty
         };
-        embed.Fields ??= [];
+        container.Fields ??= [];
 
-        return embed;
+        return container;
     }
 
-    private EmbedProperties CreateStreamerEmbed(TwitchStreamer twitchStreamer)
+    private EmbedProperties CreateBroadcastContainer(TwitchStreamer twitchStreamer)
     {
         if (twitchStreamer.StreamData is null)
             throw new ArgumentNullException(nameof(twitchStreamer));
 
-        return ApplyBaseEmbedTemplate()
+        return ApplyBaseContainerTemplate()
             .WithTitle($"{twitchStreamer.UserData.DisplayName} is now live!") // TODO: Configurable
             .WithDescription(twitchStreamer.StreamData.Title)
             .WithImage(GetStreamPreviewUrl(twitchStreamer.UserData.Login))
             .WithUrl($"https://www.twitch.tv/{twitchStreamer.UserData.Login}")
             .WithColor(new NetCord.Color(_settings.StatusColor.Online))
             .WithThumbnail(twitchStreamer.UserData.ProfileImageUrl)
-            .AddFields(CreateOnlineFields(twitchStreamer.StreamData));
+            .AddFields(CreateBroadcastDetails(twitchStreamer.StreamData));
     }
 
-    private EmbedProperties UpdateEmbed(
-        EmbedProperties embed, 
+    private EmbedProperties UpdateContainer(
+        EmbedProperties container, 
         Broadcasts.Message message, 
         bool isLive = false)
     {
         if (!isLive)
         {
             var duration = FormatDuration(DateTime.UtcNow - message.StreamData.StartedAt);
-            return ApplyBaseEmbedTemplate(embed)
+            return ApplyBaseContainerTemplate(container)
                 .WithTitle($"{message.UserData.DisplayName} finished streaming.") // TODO: Configurable
                 .WithDescription(string.Empty)
                 .WithImage(string.Empty)
@@ -379,11 +379,11 @@ public sealed class ActiveBroadcastsModule(
                 ]);
         }
 
-        return ApplyBaseEmbedTemplate(embed)
+        return ApplyBaseContainerTemplate(container)
             .WithDescription(message.StreamData.Title)
             .WithImage(GetStreamPreviewUrl(message.UserData.Login))
             .WithThumbnail(message.UserData.ProfileImageUrl)
-            .WithFields(CreateOnlineFields(message.StreamData));
+            .WithFields(CreateBroadcastDetails(message.StreamData));
     }
 
     // TODO: Configurable
@@ -441,7 +441,7 @@ public sealed class ActiveBroadcastsModule(
             + $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
     // TODO: Convert to both online and offline states usage
-    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream BroadcastData) =>
+    private static List<EmbedFieldProperties> CreateBroadcastDetails(TwitchStream BroadcastData) =>
     [
         new EmbedFieldProperties()
             .WithName("Started") // TODO: Configurable
@@ -457,7 +457,10 @@ public sealed class ActiveBroadcastsModule(
 public sealed class Broadcasts
 {
     public ulong SummaryMessageId { get; set; }
-    public EmbedProperties? SummaryEmbed { get; set; }
+
+    //ComponentContainerProperties
+    public EmbedProperties? SummaryContainer { get; set; }
+
     public List<Message> Messages { get; set; } = [];
 
     public sealed class Message
@@ -466,6 +469,6 @@ public sealed class Broadcasts
         public required int Position { get; set; }
         public required TwitchUser UserData { get; set; }
         public required TwitchStream StreamData { get; set; }
-        public EmbedProperties? UserEmbed { get; set; }
+        public EmbedProperties? BroadcastContainer { get; set; }
     }
 }
