@@ -335,7 +335,7 @@ public sealed class ActiveBroadcastsModule(
         embed.Footer ??= new EmbedFooterProperties
         {
             Text = $"{_applicationName} v{_applicationVersion}",
-            IconUrl = _settings.EmbedFooterIcon ?? string.Empty
+            IconUrl = _settings.FooterIcon ?? string.Empty
         };
         embed.Fields ??= [];
 
@@ -352,7 +352,7 @@ public sealed class ActiveBroadcastsModule(
             .WithDescription(twitchStreamer.StreamData.Title)
             .WithImage(GetStreamPreviewUrl(twitchStreamer.UserData.Login))
             .WithUrl($"https://www.twitch.tv/{twitchStreamer.UserData.Login}")
-            .WithColor(new NetCord.Color(_settings.EmbedColor.Online))
+            .WithColor(new NetCord.Color(_settings.StatusColor.Online))
             .WithThumbnail(twitchStreamer.UserData.ProfileImageUrl)
             .AddFields(CreateOnlineFields(twitchStreamer.StreamData));
     }
@@ -369,7 +369,7 @@ public sealed class ActiveBroadcastsModule(
                 .WithTitle($"{message.UserData.DisplayName} finished streaming.") // TODO: Configurable
                 .WithDescription(string.Empty)
                 .WithImage(string.Empty)
-                .WithColor(new NetCord.Color(_settings.EmbedColor.Offline))
+                .WithColor(new NetCord.Color(_settings.StatusColor.Offline))
                 .WithFields(
                 [
                     new EmbedFieldProperties()

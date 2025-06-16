@@ -66,13 +66,13 @@ public class Settings
         public int UpdateInterval { get; set; } = 60;
         public int MediaRefreshInterval { get; set; } = 6;
         public int MaxUsersPerRequest { get; set; } = 100;
-        public required string EmbedFooterIcon { get; set; }
+        public required string FooterIcon { get; set; }
 
         public NowLiveCommands NowLiveCommands { get; set; } = new();
-        public required EmbedColor EmbedColor { get; set; }
+        public required StatusColor StatusColor { get; set; }
     }
 
-    public class EmbedColor
+    public class StatusColor
     {
         public required int Online { get; set; }
         public required int Offline { get; set; }
