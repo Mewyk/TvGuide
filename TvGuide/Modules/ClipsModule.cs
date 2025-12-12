@@ -1,15 +1,13 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Runtime.CompilerServices;
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
 using TvGuide.Twitch;
 
 namespace TvGuide.Modules;
 
-public class ClipsModule(
+public sealed class ClipsModule(
     HttpClient httpClient,
     IAuthenticationModule authService,
     IOptions<Configuration> settings) 
@@ -25,25 +23,31 @@ public class ClipsModule(
     {
         ValidateParameters(parameters);
 
-        var token = await _authService.GetAccessTokenAsync(cancellationToken);
+        var token = await _authService.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, GetBaseUrl($"clips?{parameters.ToQueryString()}"));
         request.Headers.Add("Authorization", $"Bearer {token}");
         request.Headers.Add("Client-Id", _settings.Authentication.ClientId);
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
-            throw new Exception(
-                $"Request failed: {response.StatusCode} - {await response.Content.ReadAsStringAsync(cancellationToken)}");
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new HttpRequestException(
+                $"Request failed: {response.StatusCode} - {errorContent}",
+                null,
+                response.StatusCode);
+        }
 
+        var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         var result = await JsonSerializer.DeserializeAsync<TwitchClipsResponse>(
-            await response.Content.ReadAsStreamAsync(cancellationToken),
-            cancellationToken: cancellationToken);
+            responseStream,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return result is null
-            ? ((IReadOnlyList<TwitchClip> Clips, string? NextCursor))([], null)
-            : ((IReadOnlyList<TwitchClip> Clips, string? NextCursor))(result.Data, result.Pagination?.Cursor);
+            ? ([], null)
+            : (result.Data, result.Pagination?.Cursor);
     }
 
     public async IAsyncEnumerable<TwitchClip> GetAllClipsAsync(
@@ -78,7 +82,7 @@ public class ClipsModule(
     private static void ValidateParameters(TwitchClipRequest parameters)
     {
         var nonNullParams = new[] { parameters.BroadcasterId, parameters.GameId, parameters.Id }
-            .Count(param => !string.IsNullOrEmpty(param));
+            .Count(param => param is { Length: > 0 });
 
         if (nonNullParams == 0)
             throw new ArgumentException("One of BroadcasterId, GameId, or Id must be specified");
@@ -90,11 +94,13 @@ public class ClipsModule(
             throw new ArgumentException("First must be between 1 and 100");
     }
 
-    // TODO: Do this properly
     private static string GetBaseUrl(string endpoint) => $"https://api.twitch.tv/helix/{endpoint}";
 }
 
-public class TwitchClipRequest
+/// <summary>
+/// Twitch clips API request parameters.
+/// </summary>
+public sealed record TwitchClipRequest
 {
     public string? BroadcasterId { get; init; }
     public string? GameId { get; init; }
@@ -110,11 +116,11 @@ public class TwitchClipRequest
     {
         var parameters = new List<string>();
 
-        if (!string.IsNullOrEmpty(BroadcasterId))
+        if (BroadcasterId is { Length: > 0 })
             parameters.Add($"broadcaster_id={BroadcasterId}");
-        if (!string.IsNullOrEmpty(GameId))
+        if (GameId is { Length: > 0 })
             parameters.Add($"game_id={GameId}");
-        if (!string.IsNullOrEmpty(Id))
+        if (Id is { Length: > 0 })
             parameters.Add($"id={Id}");
         if (StartedAt.HasValue)
             parameters.Add($"started_at={StartedAt.Value:O}");
@@ -122,9 +128,9 @@ public class TwitchClipRequest
             parameters.Add($"ended_at={EndedAt.Value:O}");
         if (First != 20)
             parameters.Add($"first={First}");
-        if (!string.IsNullOrEmpty(Before))
+        if (Before is { Length: > 0 })
             parameters.Add($"before={Before}");
-        if (!string.IsNullOrEmpty(After))
+        if (After is { Length: > 0 })
             parameters.Add($"after={After}");
         if (IsFeatured.HasValue)
             parameters.Add($"is_featured={IsFeatured.Value.ToString().ToLower()}");
@@ -133,7 +139,10 @@ public class TwitchClipRequest
     }
 }
 
-public class TwitchClip
+/// <summary>
+/// Twitch clip with metadata.
+/// </summary>
+public sealed record TwitchClip
 {
     [JsonPropertyName("id")]
     public required string Id { get; init; }
@@ -187,11 +196,9 @@ public class TwitchClip
     public required bool IsFeatured { get; init; }
 }
 
-public class TwitchClipsResponse
-{
-    [JsonPropertyName("data")]
-    public required IReadOnlyList<TwitchClip> Data { get; init; }
-
-    [JsonPropertyName("pagination")]
-    public Pagination? Pagination { get; init; }
-}
+/// <summary>
+/// Twitch clips API response with pagination.
+/// </summary>
+public sealed record TwitchClipsResponse(
+    [property: JsonPropertyName("data")] IReadOnlyList<TwitchClip> Data,
+    [property: JsonPropertyName("pagination")] Pagination? Pagination);

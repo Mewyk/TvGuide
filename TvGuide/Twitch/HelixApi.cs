@@ -2,8 +2,7 @@
 
 namespace TvGuide.Twitch;
 
-public class Pagination
-{
-    [JsonPropertyName("cursor")]
-    public string? Cursor { get; init; }
-}
+/// <summary>
+/// Twitch pagination cursor.
+/// </summary>
+public sealed record Pagination([property: JsonPropertyName("cursor")] string? Cursor);

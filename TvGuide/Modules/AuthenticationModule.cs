@@ -1,16 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TvGuide.Modules;
 
-public class AuthenticationModule(
+public sealed class AuthenticationModule(
     HttpClient httpClient,
     IOptions<Configuration> settings,
     ILogger<AuthenticationModule> logger)
-    : IAuthenticationModule
+    : IAuthenticationModule, IDisposable
 {
     private readonly ILogger<AuthenticationModule> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
@@ -25,7 +24,7 @@ public class AuthenticationModule(
         if (!string.IsNullOrEmpty(_currentToken) && DateTime.UtcNow < _tokenExpiration)
             return _currentToken;
 
-        await _semaphore.WaitAsync(cancellationToken);
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!string.IsNullOrEmpty(_currentToken) && DateTime.UtcNow < _tokenExpiration)
@@ -39,35 +38,37 @@ public class AuthenticationModule(
             };
 
             using var content = new FormUrlEncodedContent(parameters);
-            using var response = await _httpClient.PostAsync(GetBaseUrl("token"), content, cancellationToken);
+            using var response = await _httpClient.PostAsync(GetBaseUrl("token"), content, cancellationToken).ConfigureAwait(false);
 
             response.EnsureSuccessStatusCode();
 
+            var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             var authResponse = await JsonSerializer.DeserializeAsync<AuthenticationResponse>(
-                    await response.Content.ReadAsStreamAsync(cancellationToken),
-                    cancellationToken: cancellationToken)
-                ?? throw new InvalidOperationException(_logMessages.Errors.JsonWasNotProcessed);
+                    responseStream,
+                    cancellationToken: cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Failed to deserialize authentication response");
 
             _currentToken = authResponse.AccessToken;
             _tokenExpiration = DateTime.UtcNow.AddSeconds(authResponse.ExpiresIn - 300);
 
-            _logger.LogInformation("New authentication token expires at: {Expiration}", _tokenExpiration); // TODO: LogMessage
+            _logger.LogInformation("Authentication token acquired, expires at: {Expiration}", _tokenExpiration);
             return _currentToken;
         }
-        finally { _semaphore.Release(); }
+        finally 
+        { 
+            _semaphore.Release(); 
+        }
     }
+
+    public void Dispose() => _semaphore.Dispose();
 
     private static string GetBaseUrl(string endpoint) => $"https://id.twitch.tv/oauth2/{endpoint}";
 }
 
-public record AuthenticationResponse
-{
-    [JsonPropertyName("access_token")]
-    public required string AccessToken { get; init; }
-
-    [JsonPropertyName("expires_in")]
-    public required int ExpiresIn { get; init; }
-
-    [JsonPropertyName("token_type")]
-    public required string TokenType { get; init; }
-}
+/// <summary>
+/// Twitch OAuth token response: access token, expiration, and type.
+/// </summary>
+public sealed record AuthenticationResponse(
+    [property: JsonPropertyName("access_token")] string AccessToken,
+    [property: JsonPropertyName("expires_in")] int ExpiresIn,
+    [property: JsonPropertyName("token_type")] string TokenType);
