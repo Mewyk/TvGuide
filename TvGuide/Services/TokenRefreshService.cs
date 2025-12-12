@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace TvGuide.Services;
 
-public class TokenRefreshService(
+public sealed class TokenRefreshService(
     IAuthenticationModule authenticationModule,
     ILogger<TokenRefreshService> logger,
     IOptions<Configuration> settings)
@@ -21,13 +21,14 @@ public class TokenRefreshService(
         {
             try
             {
-                await _authenticationModule.GetAccessTokenAsync(stoppingToken);
+                await _authenticationModule.GetAccessTokenAsync(stoppingToken).ConfigureAwait(false);
                 _retryCount = 0;
-                await Task.Delay(_settings.TokenNormalDelay, stoppingToken);
+                await Task.Delay(_settings.TokenNormalDelay, stoppingToken).ConfigureAwait(false);
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Do something
+                _logger.LogInformation("Token refresh service stopping");
+                break;
             }
             catch (Exception exception)
             {
@@ -38,17 +39,25 @@ public class TokenRefreshService(
                     _retryCount);
 
                 var delay = CalculateDelay(_retryCount);
-                await Task.Delay(delay, stoppingToken);
+                
+                try
+                {
+                    await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Token refresh service stopping during retry delay");
+                    break;
+                }
             }
         }
     }
 
     private TimeSpan CalculateDelay(int retryCount)
     {
-        retryCount = Math.Min(retryCount, _settings.TokenMaxRetries);
-        var delayInSeconds = Math.Pow(2, retryCount);
-
-        return TimeSpan.FromSeconds(
-            Math.Min(delayInSeconds, _settings.TokenMaxDelay.TotalSeconds));
+        var clampedRetries = Math.Min(retryCount, _settings.TokenMaxRetries);
+        var exponentialSeconds = Math.Pow(2, clampedRetries);
+        var cappedSeconds = Math.Min(exponentialSeconds, _settings.TokenMaxDelay.TotalSeconds);
+        return TimeSpan.FromSeconds(cappedSeconds);
     }
 }

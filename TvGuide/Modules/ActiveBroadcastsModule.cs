@@ -1,24 +1,45 @@
 using System.Net;
 using System.Text.Json;
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
+using NetCord;
 using NetCord.Rest;
 
 namespace TvGuide.Modules;
 
+/// <summary>
+/// Manages a single Discord message containing all active Twitch broadcasts using Components V2.
+/// </summary>
+/// <remarks>
+/// <para><b>Architecture:</b></para>
+/// <list type="bullet">
+/// <item>ONE Discord message contains ALL active broadcasts</item>
+/// <item>Each broadcast = 1 ComponentContainer (up to 10 max)</item>
+/// <item>Summary info at bottom as components (not containerized)</item>
+/// <item>Discord limits: 10 containers max, 40 total components max</item>
+/// </list>
+/// 
+/// <para><b>Offline Handling:</b></para>
+/// When a stream ends, the offline broadcast stays in the old message.
+/// A NEW message is created with only the remaining active broadcasts.
+/// This eliminates complex position management and message swapping.
+/// 
+/// <para><b>Persistence:</b></para>
+/// Broadcast data (without Discord component objects) is saved to JSON.
+/// On restart, LoadDataAsync restores broadcast list and message ID.
+/// Components are rebuilt from TwitchUser/TwitchStream data on each update.
+/// </remarks>
 public sealed class ActiveBroadcastsModule(
     IOptions<Configuration> settings,
     ILogger<ActiveBroadcastsModule> logger,
-    RestClient restClient)
+    RestClient restClient,
+    HttpClient httpClient) : IDisposable
 {
     private readonly RestClient _restClient = restClient;
+    private readonly HttpClient _httpClient = httpClient;
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
     private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
-    private readonly string _applicationName = settings.Value.ApplicationName;
-    private readonly string _applicationVersion = settings.Value.ApplicationVersion;
     private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
     private Broadcasts _activeBroadcasts = new();
 
@@ -48,424 +69,359 @@ public sealed class ActiveBroadcastsModule(
                 .DeserializeAsync<Broadcasts>(fileStream, cancellationToken: cancellationToken)
                 .ConfigureAwait(false) ?? new();
 
-            _activeBroadcasts.Messages ??= [];
+            _activeBroadcasts.ActiveBroadcasts ??= [];
 
-            _logger.LogInformation(
-                "{LogMessage} ({Data})",
-                _logMessages.DataWasLoaded,
-                _settings.ActiveBroadcastsFile);
+            _logger.LogInformation("{LogMessage} - {Count} broadcast(s) loaded",
+                _logMessages.DataWasLoaded, _activeBroadcasts.ActiveBroadcasts.Count);
         }
-        catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
+        catch (OperationCanceledException) 
+        { 
+            throw;
+        }
         catch (Exception exception)
         {
-            _logger.LogError(
-                exception,
-                "{LogMessage} ({Data})",
-                _logMessages.Errors.DataWasNotLoaded,
-                _settings.ActiveBroadcastsFile);
+            _logger.LogError(exception, "{LogMessage} ({Data})",
+                _logMessages.Errors.DataWasNotLoaded, _settings.ActiveBroadcastsFile);
             _activeBroadcasts = new();
         }
-        finally { _semaphore.Release(); }
+        finally 
+        { 
+            _semaphore.Release(); 
+        }
     }
 
     private async Task SaveDataAsync(CancellationToken cancellationToken)
     {
-        try
-        {
-            await using var fileStream = File.Create(_settings.ActiveBroadcastsFile);
-            await JsonSerializer.SerializeAsync(
-                fileStream,
-                _activeBroadcasts,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "{LogMessage} ({Data})",
-                _logMessages.Errors.JsonWasNotProcessed,
-                _settings.ActiveBroadcastsFile);
-            throw;
-        }
+        await using var fileStream = File.Create(_settings.ActiveBroadcastsFile);
+        await JsonSerializer.SerializeAsync(
+            fileStream,
+            _activeBroadcasts,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task ProcessOnlineStateAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
+    /// <summary>
+    /// Ensures the status message is rebuilt on startup to sync with current state.
+    /// </summary>
+    public async Task EnsureStatusMessageExistsAsync(CancellationToken cancellationToken)
+    {
+        await RebuildBroadcastMessageAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a new broadcast and rebuilds the single Discord message.
+    /// </summary>
+    public async Task CreateBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
-            foreach (var existingMessage in _activeBroadcasts.Messages)
-                existingMessage.Position += 1;
+            ArgumentNullException.ThrowIfNull(twitchStreamer.StreamData);
 
-            var newUserMessage = new Broadcasts.Message
+            _activeBroadcasts.ActiveBroadcasts.Insert(0, new Broadcasts.BroadcastData
             {
-                Id = _activeBroadcasts.SummaryMessageId,
-                Position = 1,
                 UserData = twitchStreamer.UserData,
-                StreamData = twitchStreamer.StreamData
-                    ?? throw new ArgumentNullException(nameof(twitchStreamer)),
-                UserEmbed = CreateStreamerEmbed(twitchStreamer)
-            };
+                StreamData = twitchStreamer.StreamData,
+                LastUpdated = DateTime.UtcNow
+            });
 
-            await _restClient.ModifyMessageAsync(
-                _settings.ChannelId,
-                _activeBroadcasts.SummaryMessageId,
-                message => message
-                    .WithContent(string.Empty)
-                    .AddEmbeds(newUserMessage.UserEmbed),
-                cancellationToken: cancellationToken);
+            if (_activeBroadcasts.ActiveBroadcasts.Count > 10)
+            {
+                _logger.LogWarning("Exceeded 10 broadcast limit, removing oldest");
+                _activeBroadcasts.ActiveBroadcasts.RemoveAt(_activeBroadcasts.ActiveBroadcasts.Count - 1);
+            }
 
-            _activeBroadcasts.Messages.Add(newUserMessage);
-
-            _activeBroadcasts.SummaryMessageId = (await _restClient.SendMessageAsync(
-                _settings.ChannelId,
-                new MessageProperties().WithContent(CreateSummaryContent()),
-                cancellationToken: cancellationToken)).Id;
-        }
-        catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "{LogMessage} ({Data})", _logMessages.Errors.Default, twitchStreamer.UserData.Id);
+            await RebuildBroadcastMessageAsync(cancellationToken);
         }
         finally { _semaphore.Release(); }
     }
 
-    public async Task ProcessOfflineStateAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
+    /// <summary>
+    /// Removes a broadcast and creates a new Discord message for remaining active broadcasts.
+    /// The old message is left with the offline broadcast.
+    /// </summary>
+    public async Task RemoveBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
-
-        var userMessage = _activeBroadcasts.Messages
-            .FirstOrDefault(
-                message => message.UserData.Id == twitchStreamer.UserData.Id);
-
-        // Skip the process if user not found (IsLive should already be marked as false)
-        // TODO: Revisit the logic leading to this issue
-        if (userMessage == null)
-        {
-            _logger.LogError(
-                "Error with user {DisplayName} ({Id})", 
-                twitchStreamer.UserData.DisplayName, twitchStreamer.UserData.Id);
-            return;
-        }
-
-        if (userMessage.UserEmbed == null)
-            throw new InvalidOperationException("UserEmbed can not be null"); // TODO: LogMessage
-
         try
         {
-            var lastPosition = _activeBroadcasts.Messages.Max(message => message.Position);
-            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage);
+            var broadcastToRemove = _activeBroadcasts.ActiveBroadcasts
+                .FirstOrDefault(b => b.UserData.Id == twitchStreamer.UserData.Id);
 
-            if (userMessage.Position == lastPosition)
+            if (broadcastToRemove == null)
             {
-                await _restClient.ModifyMessageAsync(
-                    _settings.ChannelId, userMessage.Id,
-                    message => message.AddEmbeds(userMessage.UserEmbed),
+                _logger.LogWarning(
+                    "Broadcast for {DisplayName} ({Id}) not found, skipping removal",
+                    twitchStreamer.UserData.DisplayName, twitchStreamer.UserData.Id);
+                return;
+            }
+
+            _activeBroadcasts.ActiveBroadcasts.Remove(broadcastToRemove);
+
+            var oldMessageId = _activeBroadcasts.ActiveBroadcastsMessageId;
+            
+            if (oldMessageId != 0)
+            {
+                try
+                {
+                    var offlineContainer = CreateOfflineContainer(broadcastToRemove);
+                    await _restClient.ModifyMessageAsync(
+                        _settings.ChannelId,
+                        oldMessageId,
+                        message => message
+                            .WithComponents([offlineContainer])
+                            .WithFlags(MessageFlags.IsComponentsV2),
+                        cancellationToken: cancellationToken);
+                }
+                catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
+                {
+                    _logger.LogWarning("Old broadcast message not found, cannot update to offline");
+                }
+
+                // Reset message ID so RebuildBroadcastMessageAsync creates a new message
+                _activeBroadcasts.ActiveBroadcastsMessageId = 0;
+            }
+
+            await RebuildBroadcastMessageAsync(cancellationToken);
+        }
+        finally { _semaphore.Release(); }
+    }
+
+    /// <summary>
+    /// Updates broadcast data and rebuilds the single Discord message.
+    /// </summary>
+    public async Task UpdateBroadcastMessageAsync(
+        TwitchStreamer twitchStreamer,
+        CancellationToken cancellationToken)
+    {
+        await _semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            ArgumentNullException.ThrowIfNull(twitchStreamer.StreamData);
+
+            var broadcast = _activeBroadcasts.ActiveBroadcasts
+                .FirstOrDefault(b => b.UserData.Id == twitchStreamer.UserData.Id);
+
+            if (broadcast == null)
+            {
+                _logger.LogWarning("Broadcast not found for user {UserId}, cannot update", twitchStreamer.UserData.Id);
+                return;
+            }
+
+            broadcast.UserData = twitchStreamer.UserData;
+            broadcast.StreamData = twitchStreamer.StreamData;
+            broadcast.LastUpdated = DateTime.UtcNow;
+
+            await RebuildBroadcastMessageAsync(cancellationToken);
+        }
+        finally { _semaphore.Release(); }
+    }
+
+    /// <summary>
+    /// Rebuilds the entire broadcast message with all active broadcasts and summary.
+    /// Creates a new message or modifies existing one.
+    /// </summary>
+    private async Task RebuildBroadcastMessageAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Build all containers and components
+            var components = new List<IMessageComponentProperties>();
+
+            // Add broadcast containers (max 10)
+            foreach (var broadcast in _activeBroadcasts.ActiveBroadcasts.Take(10))
+            {
+                if (broadcast.StreamData == null)
+                {
+                    _logger.LogWarning("Skipping broadcast for {User} - StreamData is null", broadcast.UserData.Login);
+                    continue;
+                }
+
+                var container = CreateBroadcastContainer(broadcast);
+                components.Add(container);
+            }
+
+            // Add summary components (not containerized)
+            components.AddRange(CreateSummaryComponents());
+
+            // Validate component count
+            if (components.Count > 40)
+            {
+                _logger.LogWarning("Component count {Count} exceeds 40 limit, truncating", components.Count);
+                components = components.Take(40).ToList();
+            }
+
+            // Create or modify message
+            if (_activeBroadcasts.ActiveBroadcastsMessageId == 0)
+            {
+                // Create new message
+                var newMessage = await _restClient.SendMessageAsync(
+                    _settings.ChannelId,
+                    new MessageProperties()
+                        .WithComponents(components)
+                        .WithFlags(MessageFlags.IsComponentsV2),
                     cancellationToken: cancellationToken);
 
-                _activeBroadcasts.Messages.Remove(userMessage);
+                _activeBroadcasts.ActiveBroadcastsMessageId = newMessage.Id;
             }
             else
             {
-                // Find the oldest embed and swap places with
-                // the offline user to readjust positions
-                var oldestMessage = _activeBroadcasts.Messages
-                    .First(message => message.Position == lastPosition);
-
-                // Swap current embed UserData/UserEmbed/StreamData with the last embed
-                (oldestMessage.UserData, userMessage.UserData) = (userMessage.UserData, oldestMessage.UserData);
-                (oldestMessage.StreamData, userMessage.StreamData) = (userMessage.StreamData, oldestMessage.StreamData);
-                (oldestMessage.UserEmbed, userMessage.UserEmbed) = (userMessage.UserEmbed, oldestMessage.UserEmbed);
-
-                // Update the embed of the online user
+                // Modify existing message
                 await _restClient.ModifyMessageAsync(
-                    _settings.ChannelId, userMessage.Id,
-                    message => message.AddEmbeds(userMessage.UserEmbed),
+                    _settings.ChannelId,
+                    _activeBroadcasts.ActiveBroadcastsMessageId,
+                    message => message
+                        .WithComponents(components)
+                        .WithFlags(MessageFlags.IsComponentsV2),
                     cancellationToken: cancellationToken);
-
-                // Update the embed of the offline user
-                await _restClient.ModifyMessageAsync(
-                    _settings.ChannelId, oldestMessage.Id,
-                    message => message.AddEmbeds(oldestMessage.UserEmbed),
-                    cancellationToken: cancellationToken);
-
-                // Removed the embed from the active broadcasts list
-                _activeBroadcasts.Messages.Remove(oldestMessage);
             }
+
+            await SaveDataAsync(cancellationToken);
         }
-        catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
         catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("Message for the user does not exist (Skipping)"); // TODO: LogMessage
-
-            // Cleanup the entry of the user
-            if (!_activeBroadcasts.Messages.Remove(userMessage))
-                throw;
+            _logger.LogWarning("Broadcast message not found, recreating");
+            _activeBroadcasts.ActiveBroadcastsMessageId = 0;
+            await RebuildBroadcastMessageAsync(cancellationToken);
         }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Offline Failure"); // TODO: LogMessage
-            throw;
-        }
-        finally { _semaphore.Release(); }
     }
-
-    public async Task ProcessUnchangedStateAsync(
-        TwitchStreamer twitchStreamer,
-        CancellationToken cancellationToken,
-        bool refreshMedia = false)
-    {
-        await _semaphore.WaitAsync(cancellationToken);
-        try
-        {
-            var userMessage = _activeBroadcasts.Messages
-                .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)
-                ?? throw new InvalidOperationException(_logMessages.Errors.UserWasNotFound);
-
-            // TODO: Add an adjustment process to log and recover (re-create) the embed
-            if (userMessage.UserEmbed is null || twitchStreamer.UserData is null || twitchStreamer.StreamData is null)
-                throw new InvalidOperationException(_logMessages.Errors.Default); // TODO
-
-            userMessage.UserData = twitchStreamer.UserData;
-            userMessage.StreamData = twitchStreamer.StreamData;
-            userMessage.UserEmbed = UpdateEmbed(userMessage.UserEmbed, userMessage, twitchStreamer.IsLive);
-
-            // Only set the media if it has changed
-            if (refreshMedia)
-                RefreshMedia(userMessage.UserEmbed, userMessage);
-
-            await _restClient.ModifyMessageAsync(
-                _settings.ChannelId,
-                userMessage.Id,
-                message => message.AddEmbeds(userMessage.UserEmbed),
-                cancellationToken: cancellationToken);
-        }
-        catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "RefreshMediaAsync failed to process"); // TODO: LogMessage
-            throw;
-        }
-        finally { _semaphore.Release(); }
-    }
-
-    public async Task UpdateSummaryAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var messageProperties = new MessageProperties()
-                .WithContent(CreateSummaryContent());
-
-            var summaryMessage = _activeBroadcasts.SummaryMessageId != 0
-                ? await _restClient.ModifyMessageAsync(
-                    _settings.ChannelId,
-                    _activeBroadcasts.SummaryMessageId,
-                    message => message.WithContent(CreateSummaryContent()),
-                    cancellationToken: cancellationToken)
-                : await _restClient.SendMessageAsync(
-                    _settings.ChannelId,
-                    messageProperties,
-                    cancellationToken: cancellationToken);
-
-            _activeBroadcasts.SummaryMessageId = summaryMessage.Id;
-            _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
-        }
-        catch (OperationCanceledException) { throw; /* TODO: Handle cancellation */ }
-        catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
-        {
-            // Specific handling for 404 Not Found
-            _logger.LogWarning("Existing summary message was not found"); // TODO: LogMessage
-            
-            var newMessage = await _restClient.SendMessageAsync(
-                _settings.ChannelId,
-                new MessageProperties().WithContent(CreateSummaryContent()),
-                cancellationToken: cancellationToken);
-
-            _activeBroadcasts.SummaryMessageId = newMessage.Id;
-            _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasCreated);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(
-                exception, 
-                "{LogMessage}", 
-                _logMessages.Errors.SummaryWasNotUpdated);
-
-            // TODO: Search messages for last message that matches the summary format
-            if (_activeBroadcasts.SummaryMessageId == 0)
-            {
-                var fallbackMessage = await _restClient.SendMessageAsync(
-                    _settings.ChannelId,
-                    new MessageProperties().WithContent(CreateSummaryContent()),
-                    cancellationToken: cancellationToken);
-
-                _activeBroadcasts.SummaryMessageId = fallbackMessage.Id;
-
-                if (_activeBroadcasts.SummaryMessageId != 0)
-                    _logger.LogDebug("{LogMessage}", _logMessages.SummaryWasUpdated);
-                else throw;
-            }
-        }
-        finally { await SaveDataAsync(cancellationToken); }
-    }
-
-    // TODO: Expand this further once other media features are added
-    public static void RefreshMedia(
-        EmbedProperties embed, 
-        Broadcasts.Message message)
-    {
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var url = $"https://www.twitch.tv/{message.StreamData.UserName}?{timestamp}";
-        embed.WithUrl(url);
-    }
-
-    public bool HasEmbed(TwitchStreamer twitchStreamer) => 
-        _activeBroadcasts.Messages
-            .FirstOrDefault(message => message.UserData.Id == twitchStreamer.UserData.Id)?
-            .UserEmbed is not null;
-
-    private EmbedProperties ApplyBaseEmbedTemplate(EmbedProperties? embed = null)
-    {
-        embed ??= new EmbedProperties();
-        
-        embed.Timestamp = DateTimeOffset.UtcNow;
-        embed.Author ??= new EmbedAuthorProperties();
-        embed.Footer ??= new EmbedFooterProperties
-        {
-            Text = $"{_applicationName} v{_applicationVersion}",
-            IconUrl = _settings.EmbedFooterIcon ?? string.Empty
-        };
-        embed.Fields ??= [];
-
-        return embed;
-    }
-
-    private EmbedProperties CreateStreamerEmbed(TwitchStreamer twitchStreamer)
-    {
-        if (twitchStreamer.StreamData is null)
-            throw new ArgumentNullException(nameof(twitchStreamer));
-
-        return ApplyBaseEmbedTemplate()
-            .WithTitle($"{twitchStreamer.UserData.DisplayName} is now live!") // TODO: Configurable
-            .WithDescription(twitchStreamer.StreamData.Title)
-            .WithImage(GetStreamPreviewUrl(twitchStreamer.UserData.Login))
-            .WithUrl($"https://www.twitch.tv/{twitchStreamer.UserData.Login}")
-            .WithColor(new NetCord.Color(_settings.EmbedColor.Online))
-            .WithThumbnail(twitchStreamer.UserData.ProfileImageUrl)
-            .AddFields(CreateOnlineFields(twitchStreamer.StreamData));
-    }
-
-    private EmbedProperties UpdateEmbed(
-        EmbedProperties embed, 
-        Broadcasts.Message message, 
-        bool isLive = false)
-    {
-        if (!isLive)
-        {
-            var duration = FormatDuration(DateTime.UtcNow - message.StreamData.StartedAt);
-            return ApplyBaseEmbedTemplate(embed)
-                .WithTitle($"{message.UserData.DisplayName} finished streaming.") // TODO: Configurable
-                .WithDescription(string.Empty)
-                .WithImage(string.Empty)
-                .WithColor(new NetCord.Color(_settings.EmbedColor.Offline))
-                .WithFields(
-                [
-                    new EmbedFieldProperties()
-                        .WithName("Stream Duration") // TODO: Configurable
-                        .WithValue(duration)
-                        .WithInline()
-                ]);
-        }
-
-        return ApplyBaseEmbedTemplate(embed)
-            .WithDescription(message.StreamData.Title)
-            .WithImage(GetStreamPreviewUrl(message.UserData.Login))
-            .WithThumbnail(message.UserData.ProfileImageUrl)
-            .WithFields(CreateOnlineFields(message.StreamData));
-    }
-
-    // TODO: Configurable
-    private string CreateSummaryContent() =>
-        _activeBroadcasts.Messages is null or { Count: 0 }
-            ? "## Active Streams\nNo streams are currently active"
-            : $"""
-              ## Active Streams
-              {string.Join("\n", _activeBroadcasts.Messages
-                  .OrderBy(user => user.Position)
-                  .Select(CreateUserLink))}
-              """;
-
-    private string CreateUserLink(Broadcasts.Message user) =>
-        $"- [{user.UserData.DisplayName}]" + 
-        $"(https://discord.com/channels/{_settings.GuildId}/{_settings.ChannelId}/{user.Id})";
 
     /// <summary>
-    /// Formats a TimeSpan duration into a human-readable string.
+    /// Checks if a broadcast is already tracked.
     /// </summary>
-    /// <param name="duration">The duration to format.</param>
-    /// <returns>Formatted duration string.</returns>    
+    public bool IsMessageTracked(TwitchStreamer twitchStreamer) => 
+        _activeBroadcasts.ActiveBroadcasts.Any(b => b.UserData.Id == twitchStreamer.UserData.Id);
+
+    /// <summary>
+    /// Creates a broadcast container with preview image attachment.
+    /// </summary>
+    private ComponentContainerProperties CreateBroadcastContainer(Broadcasts.BroadcastData broadcast)
+    {
+        ArgumentNullException.ThrowIfNull(broadcast.StreamData);
+
+        var streamUrl = $"https://www.twitch.tv/{broadcast.UserData.Login}";
+        var previewUrl = GetStreamPreviewUrl(broadcast.UserData.Login).Replace("{width}x{height}", "1920x1080");
+
+        var container = new ComponentContainerProperties()
+            .WithAccentColor(new NetCord.Color(_settings.StatusColor.Online))
+            .AddComponents(
+                new ComponentSectionProperties(
+                    new ComponentSectionThumbnailProperties(new ComponentMediaProperties(broadcast.UserData.ProfileImageUrl)))
+                    .AddComponents(
+                        new TextDisplayProperties($"## [{broadcast.UserData.DisplayName} is now live!](https://www.twitch.tv/{broadcast.UserData.Login})\n{broadcast.StreamData.Title}")
+                    ),
+                new ComponentSeparatorProperties().WithDivider(false),
+                new MediaGalleryProperties()
+                    .AddItems(new MediaGalleryItemProperties(new ComponentMediaProperties(previewUrl))),
+                new ComponentSectionProperties(
+                    new LinkButtonProperties(streamUrl, "Watch Stream"))
+                    .AddComponents(
+                        new TextDisplayProperties($"🎮 {broadcast.StreamData.GameName} | 👥 {broadcast.StreamData.ViewerCount} viewers | Started <t:{new DateTimeOffset(broadcast.StreamData.StartedAt).ToUnixTimeSeconds()}:R>")
+                    )
+            );
+
+        return container;
+    }
+
+    /// <summary>
+    /// Creates an offline container for a finished broadcast.
+    /// </summary>
+    private ComponentContainerProperties CreateOfflineContainer(Broadcasts.BroadcastData broadcast)
+    {
+        ArgumentNullException.ThrowIfNull(broadcast.StreamData);
+
+        var duration = FormatDuration(DateTime.UtcNow - broadcast.StreamData.StartedAt);
+        var section = new ComponentSectionProperties(
+            new LinkButtonProperties($"https://www.twitch.tv/{broadcast.UserData.Login}", "View Channel"))
+            .AddComponents(
+                new TextDisplayProperties($"**{broadcast.UserData.DisplayName} finished streaming**"),
+                new TextDisplayProperties($"Stream Duration: {duration}")
+            );
+
+        return new ComponentContainerProperties()
+            .WithAccentColor(new NetCord.Color(_settings.StatusColor.Offline))
+            .AddComponents(section);
+    }
+
+    /// <summary>
+    /// Creates summary components (not containerized) to show at the bottom.
+    /// </summary>
+    private List<IMessageComponentProperties> CreateSummaryComponents()
+    {
+        var components = new List<IMessageComponentProperties>();
+        var lastChecked = DateTime.UtcNow;
+
+        if (_activeBroadcasts.ActiveBroadcasts.Count == 0)
+        {
+            components.Add(new ComponentSeparatorProperties());
+            components.Add(new TextDisplayProperties($"## Active Streams\nNo streams are currently active\n\nLast checked <t:{new DateTimeOffset(lastChecked).ToUnixTimeSeconds()}:R>"));
+        }
+        else
+        {
+            components.Add(new ComponentSeparatorProperties());
+            var streamerList = string.Join("\n", _activeBroadcasts.ActiveBroadcasts
+                .Select(b => $"• [{b.UserData.DisplayName}](https://www.twitch.tv/{b.UserData.Login})"));
+            var lastUpdated = _activeBroadcasts.ActiveBroadcasts.Max(b => b.LastUpdated);
+            components.Add(new TextDisplayProperties($"## Active Streams\n{_activeBroadcasts.ActiveBroadcasts.Count} stream(s) currently active\n\n{streamerList}\n\nLast updated <t:{new DateTimeOffset(lastUpdated).ToUnixTimeSeconds()}:R>"));
+        }
+
+        return components;
+    }
+
+    /// <summary>
+    /// Formats duration to human-readable string.
+    /// </summary>
     public static string FormatDuration(TimeSpan duration)
     {
-        static string GetLabel(int value, string singular) => 
+        static string Pluralize(int value, string singular) => 
             $"{value} {singular}{(value == 1 ? "" : "s")}";
 
         if (duration.TotalMinutes < 60)
-            return GetLabel((int)duration.TotalMinutes, "minute");
+            return Pluralize((int)duration.TotalMinutes, "minute");
 
-        int hours = (int)duration.TotalHours;
-        int minutes = duration.Minutes;
+        var hours = (int)duration.TotalHours;
+        var minutes = duration.Minutes;
+        var hoursText = Pluralize(hours, "hour");
         
-        string hoursText = GetLabel(hours, "hour");
         return minutes > 0 
-            ? $"{hoursText} and {GetLabel(minutes, "minute")}"
+            ? $"{hoursText} and {Pluralize(minutes, "minute")}"
             : hoursText;
     }
 
     /// <summary>
-    /// Generates a fileStream preview image url.
+    /// Generates stream preview URL with cache-busting timestamp.
     /// </summary>
-    /// <param name="userLogin">The login name of the Twitch Streamer.</param>
-    /// <param name="width">The preview image width.</param>
-    /// <param name="height">The preview image height.</param>
-    /// <returns>A fileStream preview image url.</returns>    
-    public static string GetStreamPreviewUrl(
-        string userLogin, 
-        int width = 1280, 
-        int height = 720) => 
-            $"https://static-cdn.jtvnw.net/previews-ttv/"
-            + $"live_user_{userLogin}"
-            + $"-{width}x{height}"
-            + $".jpg?"
-            + $"{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+    public static string GetStreamPreviewUrl(string userLogin, int width = 1280, int height = 720) => 
+        $"https://static-cdn.jtvnw.net/previews-ttv/live_user_{userLogin}-{width}x{height}.jpg?{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
-    // TODO: Convert to both online and offline states usage
-    private static List<EmbedFieldProperties> CreateOnlineFields(TwitchStream BroadcastData) =>
-    [
-        new EmbedFieldProperties()
-            .WithName("Started") // TODO: Configurable
-            .WithValue($"<t:{new DateTimeOffset(BroadcastData.StartedAt).ToUnixTimeSeconds()}:R>")
-            .WithInline(),
-        new EmbedFieldProperties()
-            .WithName("Viewers") // TODO: Configurable
-            .WithValue(BroadcastData.ViewerCount.ToString())
-            .WithInline()
-    ];
+    public void Dispose() => _semaphore.Dispose();
 }
 
+/// <summary>
+/// Active broadcasts tracked in a single Discord message.
+/// </summary>
+/// <remarks>
+/// Discord Components V2 limits: 10 containers max, 40 total components max per message.
+/// Each broadcast = 1 container. Summary = additional components (not containerized).
+/// </remarks>
 public sealed class Broadcasts
 {
-    public ulong SummaryMessageId { get; set; }
-    public EmbedProperties? SummaryEmbed { get; set; }
-    public List<Message> Messages { get; set; } = [];
+    /// <summary>
+    /// Discord message ID containing all active broadcasts.
+    /// </summary>
+    public ulong ActiveBroadcastsMessageId { get; set; }
+    
+    /// <summary>
+    /// Active broadcast data.
+    /// </summary>
+    public List<BroadcastData> ActiveBroadcasts { get; set; } = [];
 
-    public sealed class Message
+    /// <summary>
+    /// Broadcast data for a single streamer.
+    /// </summary>
+    public sealed class BroadcastData
     {
-        public required ulong Id { get; set; }
-        public required int Position { get; set; }
         public required TwitchUser UserData { get; set; }
-        public required TwitchStream StreamData { get; set; }
-        public EmbedProperties? UserEmbed { get; set; }
+        public required TwitchStream? StreamData { get; set; }
+        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 }

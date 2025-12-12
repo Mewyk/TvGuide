@@ -1,66 +1,85 @@
 using System.Text.Json;
-
 using NetCord.Services.ApplicationCommands;
 
 namespace TvGuide.Attributes;
 
+/// <summary>
+/// Command attribute variables loaded from configuration.
+/// </summary>
 public static class AttributeConfiguration
 {
-    private static readonly Dictionary<string, CommandAttributeVariable> _variables;
-
-    static AttributeConfiguration()
+    private static readonly Lazy<Dictionary<string, CommandAttributeVariable>> _variables = new(() =>
     {
         var jsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AttributeVariables.json");
-        _variables = File.Exists(jsonPath)
-            ? JsonSerializer
-                .Deserialize<Dictionary<string, CommandAttributeVariable>>(
-                    File.ReadAllText(jsonPath))
-                ?? []
-            : [];
-    }
+        if (!File.Exists(jsonPath))
+            return [];
 
+        try
+        {
+            var jsonContent = File.ReadAllText(jsonPath);
+            return JsonSerializer.Deserialize<Dictionary<string, CommandAttributeVariable>>(jsonContent) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    });
+
+    /// <summary>
+    /// Gets attribute variable by key, or null if not found.
+    /// </summary>
     public static CommandAttributeVariable? GetVariable(string key) =>
-        _variables.TryGetValue(key, out var variable) ? variable : null;
+        _variables.Value.TryGetValue(key, out var variable) ? variable : null;
 }
 
+/// <summary>
+/// Dynamic sub slash command with name and description from configuration.
+/// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
-public class DynamicSubSlashCommandAttribute(
+public sealed class DynamicSubSlashCommandAttribute(
     string variableKey) 
     : SubSlashCommandAttribute(
         GetName(variableKey), 
         GetDescription(variableKey))
 {
-    private static string GetName(string key) 
-        => AttributeConfiguration.GetVariable(key)?.Name 
+    private static string GetName(string key)
+        => AttributeConfiguration.GetVariable(key)?.Name
         ?? key;
-    private static string GetDescription(string key) 
-        => AttributeConfiguration.GetVariable(key)?.Description 
+    
+    private static string GetDescription(string key)
+        => AttributeConfiguration.GetVariable(key)?.Description
         ?? string.Empty;
 }
 
+/// <summary>
+/// Dynamic slash command with name and description from configuration.
+/// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
-public class DynamicSlashCommandAttribute(
+public sealed class DynamicSlashCommandAttribute(
     string variableKey) 
     : SlashCommandAttribute(
         GetName(variableKey),
         GetDescription(variableKey))
 {
-    private static string GetName(string key) 
-        => AttributeConfiguration.GetVariable(key)?.Name 
+    private static string GetName(string key)
+        => AttributeConfiguration.GetVariable(key)?.Name
         ?? key;
 
-    private static string GetDescription(string key) 
-        => AttributeConfiguration.GetVariable(key)?.Description 
+    private static string GetDescription(string key)
+        => AttributeConfiguration.GetVariable(key)?.Description
         ?? string.Empty;
 }
 
+/// <summary>
+/// Dynamic slash command parameter with properties from configuration.
+/// </summary>
 [AttributeUsage(AttributeTargets.Parameter)]
-public class DynamicSlashCommandParameterAttribute : SlashCommandParameterAttribute
+public sealed class DynamicSlashCommandParameterAttribute : SlashCommandParameterAttribute
 {
     public DynamicSlashCommandParameterAttribute(string variableKey)
     {
         var variable = AttributeConfiguration.GetVariable(variableKey);
-        if (variable != null)
+        if (variable is not null)
         {
             Name = variable.Name;
             Description = variable.Description;
@@ -76,12 +95,15 @@ public class DynamicSlashCommandParameterAttribute : SlashCommandParameterAttrib
     }
 }
 
-public class CommandAttributeVariable
+/// <summary>
+/// Configuration values for dynamic command attributes.
+/// </summary>
+public sealed record CommandAttributeVariable
 {
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public double? MaxValue { get; set; }
-    public double? MinValue { get; set; }
-    public int? MaxLength { get; set; }
-    public int? MinLength { get; set; }
+    public string Name { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public double? MaxValue { get; init; }
+    public double? MinValue { get; init; }
+    public int? MaxLength { get; init; }
+    public int? MinLength { get; init; }
 }

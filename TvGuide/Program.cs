@@ -1,15 +1,12 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-
 using NetCord;
 using NetCord.Gateway;
 using NetCord.Hosting.Gateway;
 using NetCord.Hosting.Services;
 using NetCord.Hosting.Services.ApplicationCommands;
 using NetCord.Services.ApplicationCommands;
-
 using TvGuide;
 using TvGuide.Events;
 using TvGuide.Modules;
@@ -51,14 +48,14 @@ builder.Services
             GatewayIntents.GuildMessages |
             GatewayIntents.GuildMessageReactions |
             GatewayIntents.MessageContent;
-    });
+    })
+    .AddGatewayHandlers(typeof(Program).Assembly);
 
 builder.Services
     .AddLogging(configure => configure
         .AddConsole());
 
 var host = builder.Build()
-    .AddModules(typeof(Program).Assembly)
-    .UseGatewayEventHandlers();
+    .AddModules(typeof(Program).Assembly);
 
 await host.RunAsync();
