@@ -1,10 +1,8 @@
 using Microsoft.Extensions.Options;
-
 using NetCord;
 using NetCord.Rest;
 using NetCord.Services;
 using NetCord.Services.ApplicationCommands;
-
 using TvGuide.Attributes;
 using TvGuide.Modules;
 
@@ -30,7 +28,7 @@ public sealed class TvGuideCommandsModule(
     public async Task<InteractionMessageProperties> AddStreamerCommand(
         [DynamicSlashCommandParameter("CommandParametersAddLiveUser")] string username)
         => await _nowLiveService
-            .AddUserAsync(username, CancellationToken.None)
+            .AddUserAsync(username, default)
             .ConfigureAwait(false) 
             switch
             {
@@ -45,7 +43,7 @@ public sealed class TvGuideCommandsModule(
     public async Task<InteractionMessageProperties> RemoveStreamerCommand(
         [DynamicSlashCommandParameter("CommandParametersRemoveLiveUser")] string username)
         => await _nowLiveService
-            .RemoveUserAsync(username, CancellationToken.None)
+            .RemoveUserAsync(username, default)
             .ConfigureAwait(false)
             switch
             {
