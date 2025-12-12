@@ -71,6 +71,11 @@ public sealed class ActiveBroadcastsModule(
 
             _activeBroadcasts.ActiveBroadcasts ??= [];
 
+            // Sort by StartedAt ascending (oldest first) after loading
+            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
+                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
+                .ToList();
+
             _logger.LogInformation("{LogMessage} - {Count} broadcast(s) loaded",
                 _logMessages.DataWasLoaded, _activeBroadcasts.ActiveBroadcasts.Count);
         }
@@ -117,12 +122,17 @@ public sealed class ActiveBroadcastsModule(
         {
             ArgumentNullException.ThrowIfNull(twitchStreamer.StreamData);
 
-            _activeBroadcasts.ActiveBroadcasts.Insert(0, new Broadcasts.BroadcastData
+            _activeBroadcasts.ActiveBroadcasts.Add(new Broadcasts.BroadcastData
             {
                 UserData = twitchStreamer.UserData,
                 StreamData = twitchStreamer.StreamData,
                 LastUpdated = DateTime.UtcNow
             });
+
+            // Keep list sorted by StartedAt ascending (oldest first)
+            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
+                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
+                .ToList();
 
             if (_activeBroadcasts.ActiveBroadcasts.Count > 10)
             {
@@ -211,6 +221,11 @@ public sealed class ActiveBroadcastsModule(
             broadcast.StreamData = twitchStreamer.StreamData;
             broadcast.LastUpdated = DateTime.UtcNow;
 
+            // Re-sort list to maintain oldest-first order
+            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
+                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
+                .ToList();
+
             await RebuildBroadcastMessageAsync(cancellationToken);
         }
         finally { _semaphore.Release(); }
@@ -227,15 +242,11 @@ public sealed class ActiveBroadcastsModule(
             // Build all containers and components
             var components = new List<IMessageComponentProperties>();
 
-            // Add broadcast containers (max 10)
-            foreach (var broadcast in _activeBroadcasts.ActiveBroadcasts.Take(10))
+            // Add broadcast containers (max 10, list is already sorted oldest-first)
+            foreach (var broadcast in _activeBroadcasts.ActiveBroadcasts
+                .Where(b => b.StreamData != null)
+                .Take(10))
             {
-                if (broadcast.StreamData == null)
-                {
-                    _logger.LogWarning("Skipping broadcast for {User} - StreamData is null", broadcast.UserData.Login);
-                    continue;
-                }
-
                 var container = CreateBroadcastContainer(broadcast);
                 components.Add(container);
             }
