@@ -43,6 +43,11 @@ public sealed class ActiveBroadcastsModule(
     private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
     private Broadcasts _activeBroadcasts = new();
 
+    /// <summary>
+    /// Loads persisted broadcast data from the configured file into memory.
+    /// If the file does not exist or is empty, initializes an empty broadcast list.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the load operation.</param>
     public async Task LoadDataAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -70,8 +75,6 @@ public sealed class ActiveBroadcastsModule(
                 .ConfigureAwait(false) ?? new();
 
             _activeBroadcasts.ActiveBroadcasts ??= [];
-
-            // Sort by StartedAt ascending (oldest first) after loading
             _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
                 .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
                 .ToList();
@@ -95,6 +98,10 @@ public sealed class ActiveBroadcastsModule(
         }
     }
 
+    /// <summary>
+    /// Persists the current broadcast data to the configured file.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the save operation.</param>
     private async Task SaveDataAsync(CancellationToken cancellationToken)
     {
         await using var fileStream = File.Create(_settings.ActiveBroadcastsFile);
@@ -129,7 +136,6 @@ public sealed class ActiveBroadcastsModule(
                 LastUpdated = DateTime.UtcNow
             });
 
-            // Keep list sorted by StartedAt ascending (oldest first)
             _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
                 .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
                 .ToList();
@@ -221,7 +227,6 @@ public sealed class ActiveBroadcastsModule(
             broadcast.StreamData = twitchStreamer.StreamData;
             broadcast.LastUpdated = DateTime.UtcNow;
 
-            // Re-sort list to maintain oldest-first order
             _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
                 .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
                 .ToList();
@@ -233,16 +238,16 @@ public sealed class ActiveBroadcastsModule(
 
     /// <summary>
     /// Rebuilds the entire broadcast message with all active broadcasts and summary.
-    /// Creates a new message or modifies existing one.
+    /// Creates a new message or modifies the existing message stored in <see cref="Broadcasts.ActiveBroadcastsMessageId"/>.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the rebuild operation.</param>
     private async Task RebuildBroadcastMessageAsync(CancellationToken cancellationToken)
     {
         try
         {
-            // Build all containers and components
             var components = new List<IMessageComponentProperties>();
 
-            // Add broadcast containers (max 10, list is already sorted oldest-first)
+            
             foreach (var broadcast in _activeBroadcasts.ActiveBroadcasts
                 .Where(b => b.StreamData != null)
                 .Take(10))
@@ -250,21 +255,18 @@ public sealed class ActiveBroadcastsModule(
                 var container = CreateBroadcastContainer(broadcast);
                 components.Add(container);
             }
-
-            // Add summary components (not containerized)
+            
             components.AddRange(CreateSummaryComponents());
-
-            // Validate component count
+            
             if (components.Count > 40)
             {
                 _logger.LogWarning("Component count {Count} exceeds 40 limit, truncating", components.Count);
                 components = components.Take(40).ToList();
             }
-
-            // Create or modify message
+            
             if (_activeBroadcasts.ActiveBroadcastsMessageId == 0)
             {
-                // Create new message
+                
                 var newMessage = await _restClient.SendMessageAsync(
                     _settings.ChannelId,
                     new MessageProperties()
@@ -276,7 +278,6 @@ public sealed class ActiveBroadcastsModule(
             }
             else
             {
-                // Modify existing message
                 await _restClient.ModifyMessageAsync(
                     _settings.ChannelId,
                     _activeBroadcasts.ActiveBroadcastsMessageId,
@@ -303,8 +304,12 @@ public sealed class ActiveBroadcastsModule(
         _activeBroadcasts.ActiveBroadcasts.Any(b => b.UserData.Id == twitchStreamer.UserData.Id);
 
     /// <summary>
-    /// Creates a broadcast container with preview image attachment.
+    /// Creates a component container representing an active broadcast. The container includes
+    /// the streamer's profile thumbnail, the stream preview image, title, game, viewer count
+    /// and a link button to watch the stream.
     /// </summary>
+    /// <param name="broadcast">Broadcast data for the streamer.</param>
+    /// <returns>A configured <see cref="ComponentContainerProperties"/> representing the broadcast.</returns>
     private ComponentContainerProperties CreateBroadcastContainer(Broadcasts.BroadcastData broadcast)
     {
         ArgumentNullException.ThrowIfNull(broadcast.StreamData);
@@ -334,28 +339,45 @@ public sealed class ActiveBroadcastsModule(
     }
 
     /// <summary>
-    /// Creates an offline container for a finished broadcast.
+    /// Creates a compact container representing an offline/finished broadcast.
+    /// The container shows the streamer's profile thumbnail and stream duration with a link to the channel.
     /// </summary>
+    /// <remarks>
+    /// The thumbnail for offline containers intentionally uses the user's profile image rather than
+    /// the channel's offline image to ensure a consistent small thumbnail appearance.
+    /// </remarks>
+    /// <param name="broadcast">Broadcast data for the finished stream.</param>
+    /// <returns>A configured <see cref="ComponentContainerProperties"/> for the offline broadcast.</returns>
     private ComponentContainerProperties CreateOfflineContainer(Broadcasts.BroadcastData broadcast)
     {
         ArgumentNullException.ThrowIfNull(broadcast.StreamData);
 
         var duration = FormatDuration(DateTime.UtcNow - broadcast.StreamData.StartedAt);
-        var section = new ComponentSectionProperties(
+
+        var thumbnailUrl = broadcast.UserData.ProfileImageUrl;
+
+        var sectionThumbnail = new ComponentSectionProperties(
+            new ComponentSectionThumbnailProperties(new ComponentMediaProperties(thumbnailUrl)))
+            .AddComponents(
+                new TextDisplayProperties($"**{broadcast.UserData.DisplayName} finished streaming**")
+            );
+
+        var sectionLink = new ComponentSectionProperties(
             new LinkButtonProperties($"https://www.twitch.tv/{broadcast.UserData.Login}", "View Channel"))
             .AddComponents(
-                new TextDisplayProperties($"**{broadcast.UserData.DisplayName} finished streaming**"),
                 new TextDisplayProperties($"Stream Duration: {duration}")
             );
 
         return new ComponentContainerProperties()
             .WithAccentColor(new NetCord.Color(_settings.StatusColor.Offline))
-            .AddComponents(section);
+            .AddComponents(sectionThumbnail, sectionLink);
     }
 
     /// <summary>
-    /// Creates summary components (not containerized) to show at the bottom.
+    /// Creates summary components (not containerized) shown at the bottom of the message.
+    /// When no streams are active, the summary indicates that and omits a "last updated" timestamp.
     /// </summary>
+    /// <returns>A list of components to append to the broadcast message.</returns>
     private List<IMessageComponentProperties> CreateSummaryComponents()
     {
         var components = new List<IMessageComponentProperties>();
@@ -364,7 +386,7 @@ public sealed class ActiveBroadcastsModule(
         if (_activeBroadcasts.ActiveBroadcasts.Count == 0)
         {
             components.Add(new ComponentSeparatorProperties());
-            components.Add(new TextDisplayProperties($"## Active Streams\nNo streams are currently active\n\nLast checked <t:{new DateTimeOffset(lastChecked).ToUnixTimeSeconds()}:R>"));
+            components.Add(new TextDisplayProperties($"## Active Streams\nNo streams are currently active"));
         }
         else
         {
