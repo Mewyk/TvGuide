@@ -27,16 +27,19 @@ public sealed class TokenRefreshService(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("Token refresh service stopping");
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Token refresh service stopping");
+
                 break;
             }
             catch (Exception exception)
             {
                 _retryCount++;
-                _logger.LogError(
-                    exception, 
-                    "Error refreshing token - Attempt {RetryCount}", 
-                    _retryCount);
+                if (_logger.IsEnabled(LogLevel.Error))
+                    _logger.LogError(
+                        exception, 
+                        "Error refreshing token - Attempt {RetryCount}", 
+                        _retryCount);
 
                 var delay = CalculateDelay(_retryCount);
                 
@@ -46,7 +49,9 @@ public sealed class TokenRefreshService(
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Token refresh service stopping during retry delay");
+                    if (_logger.IsEnabled(LogLevel.Information))
+                        _logger.LogInformation("Token refresh service stopping during retry delay");
+
                     break;
                 }
             }

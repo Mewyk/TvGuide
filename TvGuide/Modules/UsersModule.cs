@@ -30,10 +30,13 @@ public sealed class UsersModule(
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogError(
-                "Failed to get user info: {StatusCode} - {Content}",
-                response.StatusCode,
-                errorContent);
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(
+                    "Failed to get user info: {StatusCode} - {Content}",
+                    response.StatusCode,
+                    errorContent);
+            }
 
             return null;
         }

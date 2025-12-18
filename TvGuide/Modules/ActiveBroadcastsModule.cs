@@ -56,10 +56,13 @@ public sealed class ActiveBroadcastsModule(
             if (!File.Exists(_settings.ActiveBroadcastsFile))
             {
                 _activeBroadcasts = new();
-                _logger.LogInformation(
-                    "{LogMessage} ({Data})",
-                    _logMessages.Errors.FileNotFound,
-                    _settings.ActiveBroadcastsFile);
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        "{LogMessage} ({Data})",
+                        _logMessages.Errors.FileNotFound,
+                        _settings.ActiveBroadcastsFile);
+                }
                 return;
             }
 
@@ -75,26 +78,30 @@ public sealed class ActiveBroadcastsModule(
                 .ConfigureAwait(false) ?? new();
 
             _activeBroadcasts.ActiveBroadcasts ??= [];
-            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
-                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
-                .ToList();
+            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts.OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)];
 
-            _logger.LogInformation("{LogMessage} - {Count} broadcast(s) loaded",
-                _logMessages.DataWasLoaded, _activeBroadcasts.ActiveBroadcasts.Count);
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation("{LogMessage} - {Count} broadcast(s) loaded",
+                    _logMessages.DataWasLoaded, _activeBroadcasts.ActiveBroadcasts.Count);
+            }
         }
-        catch (OperationCanceledException) 
-        { 
+        catch (OperationCanceledException)
+        {
             throw;
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "{LogMessage} ({Data})",
-                _logMessages.Errors.DataWasNotLoaded, _settings.ActiveBroadcastsFile);
+            if (_logger.IsEnabled(LogLevel.Error))
+            {
+                _logger.LogError(exception, "{LogMessage} ({Data})",
+                    _logMessages.Errors.DataWasNotLoaded, _settings.ActiveBroadcastsFile);
+            }
             _activeBroadcasts = new();
         }
-        finally 
-        { 
-            _semaphore.Release(); 
+        finally
+        {
+            _semaphore.Release();
         }
     }
 
@@ -136,13 +143,14 @@ public sealed class ActiveBroadcastsModule(
                 LastUpdated = DateTime.UtcNow
             });
 
-            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
-                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
-                .ToList();
+            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts
+                .OrderBy(broadcast => broadcast.StreamData?.StartedAt ?? DateTime.MaxValue)];
 
             if (_activeBroadcasts.ActiveBroadcasts.Count > 10)
             {
-                _logger.LogWarning("Exceeded 10 broadcast limit, removing oldest");
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning("Exceeded 10 broadcast limit, removing oldest");
+
                 _activeBroadcasts.ActiveBroadcasts.RemoveAt(_activeBroadcasts.ActiveBroadcasts.Count - 1);
             }
 
@@ -161,20 +169,23 @@ public sealed class ActiveBroadcastsModule(
         try
         {
             var broadcastToRemove = _activeBroadcasts.ActiveBroadcasts
-                .FirstOrDefault(b => b.UserData.Id == twitchStreamer.UserData.Id);
+                .FirstOrDefault(broadcast => broadcast.UserData.Id == twitchStreamer.UserData.Id);
 
             if (broadcastToRemove == null)
             {
-                _logger.LogWarning(
-                    "Broadcast for {DisplayName} ({Id}) not found, skipping removal",
-                    twitchStreamer.UserData.DisplayName, twitchStreamer.UserData.Id);
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(
+                        "Broadcast for {DisplayName} ({Id}) not found, skipping removal",
+                        twitchStreamer.UserData.DisplayName,
+                        twitchStreamer.UserData.Id);
+
                 return;
             }
 
             _activeBroadcasts.ActiveBroadcasts.Remove(broadcastToRemove);
 
             var oldMessageId = _activeBroadcasts.ActiveBroadcastsMessageId;
-            
+
             if (oldMessageId != 0)
             {
                 try
@@ -190,7 +201,8 @@ public sealed class ActiveBroadcastsModule(
                 }
                 catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
                 {
-                    _logger.LogWarning("Old broadcast message not found, cannot update to offline");
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                        _logger.LogWarning("Old broadcast message not found, cannot update to offline");
                 }
 
                 // Reset message ID so RebuildBroadcastMessageAsync creates a new message
@@ -215,11 +227,15 @@ public sealed class ActiveBroadcastsModule(
             ArgumentNullException.ThrowIfNull(twitchStreamer.StreamData);
 
             var broadcast = _activeBroadcasts.ActiveBroadcasts
-                .FirstOrDefault(b => b.UserData.Id == twitchStreamer.UserData.Id);
+                .FirstOrDefault(activeBroadcast => activeBroadcast.UserData.Id == twitchStreamer.UserData.Id);
 
             if (broadcast == null)
             {
-                _logger.LogWarning("Broadcast not found for user {UserId}, cannot update", twitchStreamer.UserData.Id);
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(
+                        "Broadcast not found for user {UserId}, cannot update",
+                        twitchStreamer.UserData.Id);
+
                 return;
             }
 
@@ -227,9 +243,7 @@ public sealed class ActiveBroadcastsModule(
             broadcast.StreamData = twitchStreamer.StreamData;
             broadcast.LastUpdated = DateTime.UtcNow;
 
-            _activeBroadcasts.ActiveBroadcasts = _activeBroadcasts.ActiveBroadcasts
-                .OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)
-                .ToList();
+            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts.OrderBy(activeBroadcast => activeBroadcast.StreamData?.StartedAt ?? DateTime.MaxValue)];
 
             await RebuildBroadcastMessageAsync(cancellationToken);
         }
@@ -247,26 +261,28 @@ public sealed class ActiveBroadcastsModule(
         {
             var components = new List<IMessageComponentProperties>();
 
-            
             foreach (var broadcast in _activeBroadcasts.ActiveBroadcasts
-                .Where(b => b.StreamData != null)
+                .Where(activeBroadcast => activeBroadcast.StreamData != null)
                 .Take(10))
             {
                 var container = CreateBroadcastContainer(broadcast);
                 components.Add(container);
             }
-            
+
             components.AddRange(CreateSummaryComponents());
-            
+
             if (components.Count > 40)
             {
-                _logger.LogWarning("Component count {Count} exceeds 40 limit, truncating", components.Count);
-                components = components.Take(40).ToList();
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning(
+                        "Component count {Count} exceeds 40 limit, truncating",
+                        components.Count);
+
+                components = [.. components.Take(40)];
             }
-            
+
             if (_activeBroadcasts.ActiveBroadcastsMessageId == 0)
             {
-                
                 var newMessage = await _restClient.SendMessageAsync(
                     _settings.ChannelId,
                     new MessageProperties()
@@ -291,7 +307,9 @@ public sealed class ActiveBroadcastsModule(
         }
         catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("Broadcast message not found, recreating");
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("Broadcast message not found, recreating");
+
             _activeBroadcasts.ActiveBroadcastsMessageId = 0;
             await RebuildBroadcastMessageAsync(cancellationToken);
         }
@@ -300,8 +318,8 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Checks if a broadcast is already tracked.
     /// </summary>
-    public bool IsMessageTracked(TwitchStreamer twitchStreamer) => 
-        _activeBroadcasts.ActiveBroadcasts.Any(b => b.UserData.Id == twitchStreamer.UserData.Id);
+    public bool IsMessageTracked(TwitchStreamer twitchStreamer) =>
+        _activeBroadcasts.ActiveBroadcasts.Any(broadcast => broadcast.UserData.Id == twitchStreamer.UserData.Id);
 
     /// <summary>
     /// Creates a component container representing an active broadcast. The container includes
@@ -405,7 +423,7 @@ public sealed class ActiveBroadcastsModule(
     /// </summary>
     public static string FormatDuration(TimeSpan duration)
     {
-        static string Pluralize(int value, string singular) => 
+        static string Pluralize(int value, string singular) =>
             $"{value} {singular}{(value == 1 ? "" : "s")}";
 
         if (duration.TotalMinutes < 60)
@@ -414,8 +432,8 @@ public sealed class ActiveBroadcastsModule(
         var hours = (int)duration.TotalHours;
         var minutes = duration.Minutes;
         var hoursText = Pluralize(hours, "hour");
-        
-        return minutes > 0 
+
+        return minutes > 0
             ? $"{hoursText} and {Pluralize(minutes, "minute")}"
             : hoursText;
     }
@@ -423,7 +441,7 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Generates stream preview URL with cache-busting timestamp.
     /// </summary>
-    public static string GetStreamPreviewUrl(string userLogin, int width = 1280, int height = 720) => 
+    public static string GetStreamPreviewUrl(string userLogin, int width = 1280, int height = 720) =>
         $"https://static-cdn.jtvnw.net/previews-ttv/live_user_{userLogin}-{width}x{height}.jpg?{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
     public void Dispose() => _semaphore.Dispose();
@@ -442,7 +460,7 @@ public sealed class Broadcasts
     /// Discord message ID containing all active broadcasts.
     /// </summary>
     public ulong ActiveBroadcastsMessageId { get; set; }
-    
+
     /// <summary>
     /// Active broadcast data.
     /// </summary>

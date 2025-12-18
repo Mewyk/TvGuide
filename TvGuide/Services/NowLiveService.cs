@@ -48,8 +48,8 @@ public sealed class NowLiveService(
     IUsersModule usersModule,
     IOptions<Configuration> settings,
     ILogger<NowLiveService> logger,
-    BroadcastStates broadcastState
-) : BackgroundService, INowLiveService
+    BroadcastStates broadcastState)
+    : BackgroundService, INowLiveService
 {
     private readonly IStreamsModule _streamsModule = streamsModule;
     private readonly IUsersModule _usersModule = usersModule;
@@ -85,8 +85,9 @@ public sealed class NowLiveService(
 
         try
         {
-            _logger.LogInformation("Starting");
-            
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Starting");
+
             RegisterEventHandlers();
 
             ServiceStarting?.Invoke(this, new ServiceEventArguments(cancellationToken));
@@ -98,7 +99,8 @@ public sealed class NowLiveService(
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Exiting");
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Exiting");
 
             ServiceExiting?.Invoke(this, new ServiceEventArguments(cancellationToken));
 
@@ -107,7 +109,8 @@ public sealed class NowLiveService(
         }
         finally
         {
-            _logger.LogInformation("Exited");
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Exited");
 
             ServiceExited?.Invoke(this, new ServiceEventArguments(CancellationToken.None));
         }
@@ -149,7 +152,8 @@ public sealed class NowLiveService(
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Started");
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Started");
 
         ServiceStarted?.Invoke(this, new ServiceEventArguments(cancellationToken));
 
@@ -229,7 +233,8 @@ public sealed class NowLiveService(
         
         await _data.SaveUsersAsync(_users.Values, cancellationToken);
 
-        _logger.LogDebug("{LogMessage}", _logMessages.UserWasSaved);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("{LogMessage}", _logMessages.UserWasSaved);
     }
 
     private async Task UpdateUserStateAsync(
@@ -278,10 +283,8 @@ public sealed class NowLiveService(
 
         if (user == null)
         {
-            _logger.LogWarning(
-                "{LogMessage} ({Data})", 
-                _logMessages.Errors.UserWasNotFound, 
-                userLogin);
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotFound, userLogin);
 
             return UserManagementResult.NotFound;
         }
@@ -298,19 +301,19 @@ public sealed class NowLiveService(
         {
             var args = new UsersEventArguments(cancellationToken) { Users = [twitchStreamer] };
             UserAdded?.Invoke(this, args);
-            
+
             await _data.SaveUsersAsync(_users.Values, cancellationToken);
 
-            _logger.LogDebug(
-                "{LogMessage} ({Data})", 
-                _logMessages.UserWasSaved, 
-                userLogin);
-            
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("{LogMessage} ({Data})", _logMessages.UserWasSaved, userLogin);
+
             return UserManagementResult.Success;
         }
         else
         {
-            _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserExists, user.Id);
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserExists, user.Id);
+
             return UserManagementResult.AlreadyExists;
         }
     }
@@ -326,10 +329,8 @@ public sealed class NowLiveService(
 
         if (userId == null)
         {
-            _logger.LogWarning(
-                "{LogMessage} ({Data})",
-                _logMessages.Errors.UserWasNotFound,
-                userLogin);
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotFound, userLogin);
 
             return UserManagementResult.NotFound;
         }
@@ -343,10 +344,8 @@ public sealed class NowLiveService(
             return UserManagementResult.Success;
         }
 
-        _logger.LogError(
-            "{LogMessage} ({Data})", 
-            _logMessages.Errors.UserWasNotRemoved, 
-            userId);
+        if (_logger.IsEnabled(LogLevel.Error))
+            _logger.LogError("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotRemoved, userId);
 
         return UserManagementResult.Error;
     }

@@ -57,8 +57,12 @@ public sealed class BroadcastStates(
     /// </remarks>
     public async void OnBroadcastDetectedLive(object? sender, UsersEventArguments eventData)
     {
-        _logger.LogDebug("{LogMessage} (Total: {Count})", 
-            _logMessages.StreamIsOnline, eventData.Users.Count);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(
+                "{LogMessage} (Total: {Count})",
+                _logMessages.StreamIsOnline,
+                eventData.Users.Count);
+
         await ProcessDetectedLiveAsync(eventData).ConfigureAwait(false);
     }
 
@@ -75,7 +79,11 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process online state for {Count} users", eventData.Users.Count);
+            if (_logger.IsEnabled(LogLevel.Error))
+                _logger.LogError(
+                    exception,
+                    "Failed to process online state for {Count} users",
+                    eventData.Users.Count);
         }
     }
 
@@ -84,8 +92,12 @@ public sealed class BroadcastStates(
     /// </summary>
     public async void OnBroadcastEnded(object? sender, UsersEventArguments eventData)
     {
-        _logger.LogDebug("{LogMessage} (Total: {Count})", 
-            _logMessages.StreamIsOffline, eventData.Users.Count);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(
+                "{LogMessage} (Total: {Count})",
+                _logMessages.StreamIsOffline,
+                eventData.Users.Count);
+
         await ProcessEndedBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
@@ -100,7 +112,11 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process offline state for {Count} users", eventData.Users.Count);
+            if (_logger.IsEnabled(LogLevel.Error))
+                _logger.LogError(
+                    exception,
+                    "Failed to process offline state for {Count} users",
+                    eventData.Users.Count);
         }
     }
 
@@ -109,8 +125,12 @@ public sealed class BroadcastStates(
     /// </summary>
     public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArguments eventData)
     {
-        _logger.LogDebug("{LogMessage} (Total: {Count})", 
-            _logMessages.StreamMediaWasRefreshed, eventData.Users.Count);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(
+                "{LogMessage} (Total: {Count})",
+                _logMessages.StreamMediaWasRefreshed,
+                eventData.Users.Count);
+
         await ProcessMediaRefreshAsync(eventData).ConfigureAwait(false);
     }
 
@@ -127,7 +147,11 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process media refresh for {Count} users", eventData.Users.Count);
+            if (_logger.IsEnabled(LogLevel.Error))
+                _logger.LogError(
+                    exception,
+                    "Failed to process media refresh for {Count} users",
+                    eventData.Users.Count);
         }
     }
 
@@ -159,8 +183,12 @@ public sealed class BroadcastStates(
     /// </summary>
     public async void OnBroadcastContinuing(object? sender, UsersEventArguments eventData)
     {
-        _logger.LogDebug("{LogMessage} (Total: {Count})", 
-            _logMessages.StreamIsUnchanged, eventData.Users.Count);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(
+                "{LogMessage} (Total: {Count})",
+                _logMessages.StreamIsUnchanged,
+                eventData.Users.Count);
+
         await ProcessContinuingBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
@@ -177,7 +205,11 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process unchanged state for {Count} users", eventData.Users.Count);
+            if (_logger.IsEnabled(LogLevel.Error))
+                _logger.LogError(
+                    exception,
+                    "Failed to process unchanged state for {Count} users",
+                    eventData.Users.Count);
         }
     }
 
@@ -188,16 +220,25 @@ public sealed class BroadcastStates(
         => _logger.LogDebug("Now Live service has exited");
 
     public void OnUserAdded(object? sender, UsersEventArguments eventData)
-        => _logger.LogDebug("{Count} user(s) added to tracking list", eventData.Users.Count);
+    {
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("{Count} user(s) added to tracking list", eventData.Users.Count);
+    }
 
     public void OnUserRemoved(object? sender, UsersEventArguments eventData)
-        => _logger.LogDebug("{Count} user(s) removed from tracking list", eventData.Users.Count);
+    {
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("{Count} user(s) removed from tracking list", eventData.Users.Count);
+    }
 
     public void OnUserStreamError(object? sender, ErrorEventArguments eventData)
-        => _logger.LogError(
-            eventData.Exception,
-            "Error processing user stream - UserId: {UserId}, Message: {Message}",
-            eventData.UserId, eventData.Message);
+    {
+        if (_logger.IsEnabled(LogLevel.Error))
+            _logger.LogError(
+                    eventData.Exception,
+                    "Error processing user stream - UserId: {UserId}, Message: {Message}",
+                    eventData.UserId, eventData.Message);
+    }
 }
 
 /// <summary>
