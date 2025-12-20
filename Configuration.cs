@@ -1,4 +1,3 @@
-using System.Reflection;
 using NetCord;
 
 namespace TvGuide;
@@ -9,16 +8,6 @@ public sealed record Configuration
     public required Settings.Twitch Twitch { get; init; }
     public required Settings.NowLive NowLive { get; init; }
     public required LogMessages LogMessages { get; init; } = new();
-    public required string ApplicationName { get; init; } = ApplicationNameDefault;
-    public required string ApplicationVersion { get; init; } = ApplicationVersionDefault;
-
-    public static string ApplicationVersionDefault => Assembly
-        .GetExecutingAssembly()
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-        .InformationalVersion.Split('+')[0] ?? "0.0.0";
-
-    public static string ApplicationNameDefault => 
-        Assembly.GetExecutingAssembly().GetName().Name ?? "TvGuide";
 }
 
 public static class Settings

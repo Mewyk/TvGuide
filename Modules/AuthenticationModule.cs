@@ -53,7 +53,7 @@ public sealed class AuthenticationModule(
 
             if (_logger.IsEnabled(LogLevel.Information))
                 _logger.LogInformation("Authentication token acquired, expires at: {Expiration}", _tokenExpiration);
-            
+
             return _currentToken;
         }
         finally { _semaphore.Release(); }
