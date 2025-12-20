@@ -10,7 +10,7 @@
     <PublishSingleFile>true</PublishSingleFile>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
-    <Version>$(VersionPrefix)1.2.9</Version>
+    <Version>$(VersionPrefix)20251218</Version>
     <Authors>$(AssemblyName), Mewyk</Authors>
   </PropertyGroup>
 
