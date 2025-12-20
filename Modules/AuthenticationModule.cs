@@ -51,13 +51,12 @@ public sealed class AuthenticationModule(
             _currentToken = authResponse.AccessToken;
             _tokenExpiration = DateTime.UtcNow.AddSeconds(authResponse.ExpiresIn - 300);
 
-            _logger.LogInformation("Authentication token acquired, expires at: {Expiration}", _tokenExpiration);
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("Authentication token acquired, expires at: {Expiration}", _tokenExpiration);
+
             return _currentToken;
         }
-        finally 
-        { 
-            _semaphore.Release(); 
-        }
+        finally { _semaphore.Release(); }
     }
 
     public void Dispose() => _semaphore.Dispose();
