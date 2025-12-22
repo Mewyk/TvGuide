@@ -4,7 +4,9 @@
 # TvGuide
 Discord bot written in C# (.NET 9) for automatically displaying and updating information about twitch streams based on added users.
 
-<img src="https://github.com/user-attachments/assets/8d5932b7-8dcc-401d-87f6-eb30001335ae" alt="First Preview" width="25%" height="auto" />
+<img src="Resources/Screenshots/Desktop.Primary.png" alt="First Preview" width="75%" height="auto" />
+<br>
+<img src="Resources/Screenshots/Mobile.Primary.png" alt="First Preview" width="25%" height="auto" />
 <img src="https://github.com/user-attachments/assets/f0f5cfc9-ebea-420a-a717-d4eafb542947" alt="Adding a user" width="25%" height="auto" />
 <img src="https://github.com/user-attachments/assets/ec429818-3f6e-4192-a81b-de600bb4fef4" alt="User was added" width="25%" height="auto" />
 
