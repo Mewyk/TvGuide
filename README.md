@@ -7,7 +7,7 @@ Discord bot written in C# (.NET 9) for automatically displaying and updating inf
 ### Desktop Screenshot - How it looks
 <img src="Resources/Screenshots/Desktop.Primary.png" alt="First Preview" width="100%" height="auto" />
 
-### (Desktop) Screenshot - Adding a user
+### (Mobile) Screenshot - Adding a user
 <img src="https://github.com/user-attachments/assets/f0f5cfc9-ebea-420a-a717-d4eafb542947" alt="Adding a user" width="25%" height="auto" />
 <img src="https://github.com/user-attachments/assets/ec429818-3f6e-4192-a81b-de600bb4fef4" alt="User was added" width="25%" height="auto" />
 
