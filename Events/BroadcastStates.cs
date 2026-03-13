@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TvGuide.Modules;
 
 namespace TvGuide.Events;
@@ -34,11 +33,9 @@ namespace TvGuide.Events;
 /// </remarks>
 public sealed class BroadcastStates(
     ILogger<BroadcastStates> logger,
-    IOptions<Configuration> settings,
     ActiveBroadcastsModule activeBroadcastsModule)
 {
     private readonly ILogger<BroadcastStates> _logger = logger;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly ActiveBroadcastsModule _activeBroadcasts = activeBroadcastsModule;
 
     /// <summary>
@@ -59,11 +56,7 @@ public sealed class BroadcastStates(
     /// <param name="eventData">Users detected as currently live.</param>
     public async void OnBroadcastDetectedLive(object? sender, UsersEventArguments eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsOnline,
-                eventData.Users.Count);
+        BroadcastStatesLog.OnlineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessDetectedLiveAsync(eventData).ConfigureAwait(false);
     }
@@ -81,11 +74,7 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process online state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedOnlineStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
@@ -96,11 +85,7 @@ public sealed class BroadcastStates(
     /// <param name="eventData">Users whose broadcasts have ended.</param>
     public async void OnBroadcastEnded(object? sender, UsersEventArguments eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsOffline,
-                eventData.Users.Count);
+        BroadcastStatesLog.OfflineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessEndedBroadcastsAsync(eventData).ConfigureAwait(false);
     }
@@ -116,11 +101,7 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process offline state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedOfflineStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
@@ -131,11 +112,7 @@ public sealed class BroadcastStates(
     /// <param name="eventData">Users whose active broadcasts need refreshed preview media.</param>
     public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArguments eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamMediaWasRefreshed,
-                eventData.Users.Count);
+        BroadcastStatesLog.MediaRefreshSummary(_logger, eventData.Users.Count);
 
         await ProcessMediaRefreshAsync(eventData).ConfigureAwait(false);
     }
@@ -153,11 +130,7 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process media refresh for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedMediaRefreshProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
@@ -180,7 +153,7 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process service starting");
+            BroadcastStatesLog.FailedServiceStarting(_logger, exception);
         }
     }
 
@@ -201,11 +174,7 @@ public sealed class BroadcastStates(
     /// <param name="eventData">Users whose broadcasts are still live without changes.</param>
     public async void OnBroadcastContinuing(object? sender, UsersEventArguments eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsUnchanged,
-                eventData.Users.Count);
+        BroadcastStatesLog.ContinuingStateSummary(_logger, eventData.Users.Count);
 
         await ProcessContinuingBroadcastsAsync(eventData).ConfigureAwait(false);
     }
@@ -223,11 +192,7 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process unchanged state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedContinuingStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
@@ -237,7 +202,7 @@ public sealed class BroadcastStates(
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Generic event data for the service start notification.</param>
     public void OnServiceStarted(object? sender, EventArgs eventData)
-        => _logger.LogDebug("Now Live service has started successfully");
+        => BroadcastStatesLog.ServiceStarted(_logger);
 
     /// <summary>
     /// Handles the service-exited event.
@@ -245,7 +210,7 @@ public sealed class BroadcastStates(
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Generic event data for the service exit notification.</param>
     public void OnServiceExited(object? sender, EventArgs eventData)
-        => _logger.LogDebug("Now Live service has exited");
+        => BroadcastStatesLog.ServiceExited(_logger);
 
     /// <summary>
     /// Handles the user-added event.
@@ -253,10 +218,7 @@ public sealed class BroadcastStates(
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users that were added to tracking.</param>
     public void OnUserAdded(object? sender, UsersEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug("{Count} user(s) added to tracking list", eventData.Users.Count);
-    }
+        => BroadcastStatesLog.UsersAdded(_logger, eventData.Users.Count);
 
     /// <summary>
     /// Handles the user-removed event.
@@ -264,10 +226,7 @@ public sealed class BroadcastStates(
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users that were removed from tracking.</param>
     public void OnUserRemoved(object? sender, UsersEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug("{Count} user(s) removed from tracking list", eventData.Users.Count);
-    }
+        => BroadcastStatesLog.UsersRemoved(_logger, eventData.Users.Count);
 
     /// <summary>
     /// Handles per-user broadcast processing errors.
@@ -275,13 +234,7 @@ public sealed class BroadcastStates(
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Error details for the failed user update.</param>
     public void OnUserStreamError(object? sender, ErrorEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Error))
-            _logger.LogError(
-                    eventData.Exception,
-                    "Error processing user stream - UserId: {UserId}, Message: {Message}",
-                    eventData.UserId, eventData.Message);
-    }
+        => BroadcastStatesLog.UserStreamError(_logger, eventData.Exception, eventData.UserId, eventData.Message);
 }
 
 /// <summary>

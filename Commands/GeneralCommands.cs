@@ -18,7 +18,7 @@ public sealed class TvGuideCommandsModule(
 ) : ApplicationCommandModule<ApplicationCommandContext>
 {
     private readonly INowLiveService _nowLiveService = nowLiveService;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
+    private readonly LogMessages _messages = settings.Value.LogMessages;
     private readonly Settings.NowLiveCommands _settings = settings.Value.NowLive.NowLiveCommands;
 
     private InteractionMessageProperties CreateMessage(string content) => new()
@@ -40,10 +40,10 @@ public sealed class TvGuideCommandsModule(
             .ConfigureAwait(false) 
             switch
             {
-                UserManagementResult.NotFound => CreateMessage($"{_logMessages.Errors.UserWasNotFound} ({username})"),
-                UserManagementResult.Success => CreateMessage($"{_logMessages.UserWasAdded} ({username})"),
-                UserManagementResult.AlreadyExists => CreateMessage($"{_logMessages.Errors.UserExists} ({username})"),
-                _ => CreateMessage(_logMessages.Errors.Default)
+                UserManagementResult.NotFound => CreateMessage($"{_messages.Errors.UserWasNotFound} ({username})"),
+                UserManagementResult.Success => CreateMessage($"{_messages.UserWasAdded} ({username})"),
+                UserManagementResult.AlreadyExists => CreateMessage($"{_messages.Errors.UserExists} ({username})"),
+                _ => CreateMessage(_messages.Errors.Default)
             };
 
     /// <summary>
@@ -60,8 +60,8 @@ public sealed class TvGuideCommandsModule(
             .ConfigureAwait(false)
             switch
             {
-                UserManagementResult.NotFound => CreateMessage($"{_logMessages.Errors.UserWasNotFound} ({username})"),
-                UserManagementResult.Success => CreateMessage($"{_logMessages.UserWasRemoved} ({username})"),
-                _ => CreateMessage(_logMessages.Errors.Default)
+                UserManagementResult.NotFound => CreateMessage($"{_messages.Errors.UserWasNotFound} ({username})"),
+                UserManagementResult.Success => CreateMessage($"{_messages.UserWasRemoved} ({username})"),
+                _ => CreateMessage(_messages.Errors.Default)
             };
 }

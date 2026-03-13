@@ -34,10 +34,7 @@ public sealed class UsersModule(
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                Log.FailedToGetUserInfo(_logger, response.StatusCode, errorContent);
-            }
+            UsersModuleLog.FailedToGetUserInfo(_logger, response.StatusCode, errorContent);
 
             return null;
         }
@@ -51,12 +48,6 @@ public sealed class UsersModule(
     }
 
     private static string GetBaseUrl(string endpoint) => $"https://api.twitch.tv/helix/{endpoint}";
-
-    private static partial class Log
-    {
-        [LoggerMessage(EventId = 1400, Level = LogLevel.Error, Message = "Failed to get user info: {StatusCode} - {Content}")]
-        public static partial void FailedToGetUserInfo(ILogger logger, System.Net.HttpStatusCode statusCode, string content);
-    }
 }
 
 /// <summary>

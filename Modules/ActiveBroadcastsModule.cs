@@ -38,7 +38,6 @@ public sealed class ActiveBroadcastsModule(
     private readonly RestClient _restClient = restClient;
     private readonly HttpClient _httpClient = httpClient;
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
     private Broadcasts _activeBroadcasts = new();
@@ -56,13 +55,7 @@ public sealed class ActiveBroadcastsModule(
             if (!File.Exists(_settings.ActiveBroadcastsFile))
             {
                 _activeBroadcasts = new();
-                if (_logger.IsEnabled(LogLevel.Information))
-                {
-                    _logger.LogInformation(
-                        "{LogMessage} ({Data})",
-                        _logMessages.Errors.FileNotFound,
-                        _settings.ActiveBroadcastsFile);
-                }
+                ActiveBroadcastsModuleLog.ActiveBroadcastFileNotFound(_logger, _settings.ActiveBroadcastsFile);
                 return;
             }
 
@@ -80,11 +73,7 @@ public sealed class ActiveBroadcastsModule(
             _activeBroadcasts.ActiveBroadcasts ??= [];
             _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts.OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)];
 
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                _logger.LogInformation("{LogMessage} - {Count} broadcast(s) loaded",
-                    _logMessages.DataWasLoaded, _activeBroadcasts.ActiveBroadcasts.Count);
-            }
+            ActiveBroadcastsModuleLog.BroadcastsLoaded(_logger, _activeBroadcasts.ActiveBroadcasts.Count);
         }
         catch (OperationCanceledException)
         {
@@ -92,11 +81,10 @@ public sealed class ActiveBroadcastsModule(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-            {
-                _logger.LogError(exception, "{LogMessage} ({Data})",
-                    _logMessages.Errors.DataWasNotLoaded, _settings.ActiveBroadcastsFile);
-            }
+            ActiveBroadcastsModuleLog.FailedToLoadBroadcastData(
+                _logger,
+                exception,
+                _settings.ActiveBroadcastsFile);
             _activeBroadcasts = new();
         }
         finally
@@ -151,8 +139,7 @@ public sealed class ActiveBroadcastsModule(
 
             if (_activeBroadcasts.ActiveBroadcasts.Count > 10)
             {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning("Exceeded 10 broadcast limit, removing oldest");
+                ActiveBroadcastsModuleLog.ExceededBroadcastLimit(_logger);
 
                 _activeBroadcasts.ActiveBroadcasts.RemoveAt(_activeBroadcasts.ActiveBroadcasts.Count - 1);
             }
@@ -178,11 +165,10 @@ public sealed class ActiveBroadcastsModule(
 
             if (broadcastToRemove == null)
             {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning(
-                        "Broadcast for {DisplayName} ({Id}) not found, skipping removal",
-                        twitchStreamer.UserData.DisplayName,
-                        twitchStreamer.UserData.Id);
+                ActiveBroadcastsModuleLog.BroadcastNotFoundForRemoval(
+                    _logger,
+                    twitchStreamer.UserData.DisplayName,
+                    twitchStreamer.UserData.Id);
 
                 return;
             }
@@ -206,8 +192,7 @@ public sealed class ActiveBroadcastsModule(
                 }
                 catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
                 {
-                    if (_logger.IsEnabled(LogLevel.Warning))
-                        _logger.LogWarning("Old broadcast message not found, cannot update to offline");
+                    ActiveBroadcastsModuleLog.OldBroadcastMessageNotFound(_logger);
                 }
 
                 // Reset message ID so RebuildBroadcastMessageAsync creates a new message
@@ -238,10 +223,7 @@ public sealed class ActiveBroadcastsModule(
 
             if (broadcast == null)
             {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning(
-                        "Broadcast not found for user {UserId}, cannot update",
-                        twitchStreamer.UserData.Id);
+                ActiveBroadcastsModuleLog.BroadcastNotFoundForUpdate(_logger, twitchStreamer.UserData.Id);
 
                 return;
             }
@@ -280,10 +262,7 @@ public sealed class ActiveBroadcastsModule(
 
             if (components.Count > 40)
             {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning(
-                        "Component count {Count} exceeds 40 limit, truncating",
-                        components.Count);
+                ActiveBroadcastsModuleLog.ComponentCountExceeded(_logger, components.Count);
 
                 components = [.. components.Take(40)];
             }
@@ -314,8 +293,7 @@ public sealed class ActiveBroadcastsModule(
         }
         catch (RestException restException) when (restException.StatusCode == HttpStatusCode.NotFound)
         {
-            if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("Broadcast message not found, recreating");
+            ActiveBroadcastsModuleLog.BroadcastMessageNotFound(_logger);
 
             _activeBroadcasts.ActiveBroadcastsMessageId = 0;
             await RebuildBroadcastMessageAsync(cancellationToken);

@@ -21,7 +21,6 @@ public sealed class AuthenticationModule(
     private readonly ILogger<AuthenticationModule> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
     private readonly Settings.TwitchAuthentication _settings = settings.Value.Twitch.Authentication;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private string? _currentToken;
     private DateTime _tokenExpiration = DateTime.MinValue;
@@ -59,8 +58,7 @@ public sealed class AuthenticationModule(
             _currentToken = authResponse.AccessToken;
             _tokenExpiration = DateTime.UtcNow.AddSeconds(authResponse.ExpiresIn - 300);
 
-            if (_logger.IsEnabled(LogLevel.Information))
-                Log.AuthenticationTokenAcquired(_logger, _tokenExpiration);
+            AuthenticationModuleLog.AuthenticationTokenAcquired(_logger, _tokenExpiration);
 
             return _currentToken;
         }
@@ -73,12 +71,6 @@ public sealed class AuthenticationModule(
     public void Dispose() => _semaphore.Dispose();
 
     private static string GetBaseUrl(string endpoint) => $"https://id.twitch.tv/oauth2/{endpoint}";
-
-    private static partial class Log
-    {
-        [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Authentication token acquired, expires at: {Expiration}")]
-        public static partial void AuthenticationTokenAcquired(ILogger logger, DateTime expiration);
-    }
 }
 
 /// <summary>
