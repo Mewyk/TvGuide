@@ -3,7 +3,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TvGuide.Events;
+using TvGuide.Models;
 using TvGuide.Modules;
+using TwitchSharp;
+using TwitchSharp.Api;
 
 namespace TvGuide.Services;
 
@@ -44,75 +47,111 @@ namespace TvGuide.Services;
 /// </remarks>
 public sealed class NowLiveService(
     DataModule data,
-    IStreamsModule streamsModule,
-    IUsersModule usersModule,
+    TwitchApiClient twitchApiClient,
     IOptions<Configuration> settings,
     ILogger<NowLiveService> logger,
     BroadcastStates broadcastState)
     : BackgroundService, INowLiveService
 {
-    private readonly IStreamsModule _streamsModule = streamsModule;
-    private readonly IUsersModule _usersModule = usersModule;
+    private readonly TwitchApiClient _twitchApiClient = twitchApiClient;
     private readonly ILogger<NowLiveService> _logger = logger;
     private readonly DataModule _data = data;
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
-    private readonly ConcurrentDictionary<string, TwitchStreamer> _users = new();
+    private readonly ConcurrentDictionary<string, TrackedTwitchUser> _users = new(StringComparer.Ordinal);
     private readonly BroadcastStates _broadcastState = broadcastState;
 
     // Bulk event handlers
-    public event EventHandler<UsersEventArguments>? BroadcastDetectedLive;
-    public event EventHandler<UsersEventArguments>? BroadcastEnded;
-    public event EventHandler<UsersEventArguments>? BroadcastContinuing;
-    public event EventHandler<UsersEventArguments>? BroadcastMediaRefreshDue;
+    /// <summary>
+    /// Raised when tracked users are detected as live during a polling cycle.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? BroadcastDetectedLive;
+
+    /// <summary>
+    /// Raised when tracked users transition from live to offline.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? BroadcastEnded;
+
+    /// <summary>
+    /// Raised when tracked users remain live with no state change.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? BroadcastContinuing;
+
+    /// <summary>
+    /// Raised when active broadcasts require preview-media refresh.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? BroadcastMediaRefreshDue;
 
     // Service lifecycle event handlers
-    public event EventHandler<ServiceEventArguments>? ServiceStarting;
-    public event EventHandler<ServiceEventArguments>? ServiceStarted;
-    public event EventHandler<ServiceEventArguments>? ServiceExiting;
-    public event EventHandler<ServiceEventArguments>? ServiceExited;
+    /// <summary>
+    /// Raised before persisted state is loaded during service startup.
+    /// </summary>
+    public event EventHandler<ServiceEventArgs>? ServiceStarting;
+
+    /// <summary>
+    /// Raised after the service has started.
+    /// </summary>
+    public event EventHandler<ServiceEventArgs>? ServiceStarted;
+
+    /// <summary>
+    /// Raised when the service is shutting down and cleanup is beginning.
+    /// </summary>
+    public event EventHandler<ServiceEventArgs>? ServiceExiting;
+
+    /// <summary>
+    /// Raised after the service has completed shutdown.
+    /// </summary>
+    public event EventHandler<ServiceEventArgs>? ServiceExited;
 
     // Single user event handlers
-    public event EventHandler<UsersEventArguments>? UserAdded;
-    public event EventHandler<UsersEventArguments>? UserRemoved;
+    /// <summary>
+    /// Raised when a user is added to the tracking list.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? UserAdded;
 
-    public event EventHandler<ErrorEventArguments>? UserBroadcastError;
+    /// <summary>
+    /// Raised when a user is removed from the tracking list.
+    /// </summary>
+    public event EventHandler<UsersEventArgs>? UserRemoved;
 
-    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Raised when processing a user's broadcast state results in an exception.
+    /// </summary>
+    public event EventHandler<Events.ErrorEventArgs>? UserBroadcastError;
+
+    /// <inheritdoc/>
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using PeriodicTimer periodicTimer = 
             new(TimeSpan.FromSeconds(_settings.UpdateInterval));
 
         try
         {
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Starting");
+            NowLiveServiceLog.ServiceStarting(_logger);
 
             RegisterEventHandlers();
 
-            ServiceStarting?.Invoke(this, new ServiceEventArguments(cancellationToken));
+            ServiceStarting?.Invoke(this, new ServiceEventArgs(stoppingToken));
 
-            await LoadUsersAsync(cancellationToken);
+            await LoadUsersAsync(stoppingToken).ConfigureAwait(false);
+            await UpdateBroadcastStatesAsync(stoppingToken).ConfigureAwait(false);
 
-            while (await periodicTimer.WaitForNextTickAsync(cancellationToken))
-                await UpdateBroadcastStatesAsync(cancellationToken);
+            while (await periodicTimer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+                await UpdateBroadcastStatesAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Exiting");
+            NowLiveServiceLog.ServiceExiting(_logger);
 
-            ServiceExiting?.Invoke(this, new ServiceEventArguments(cancellationToken));
+            ServiceExiting?.Invoke(this, new ServiceEventArgs(stoppingToken));
 
-            await _data.SaveUsersAsync(_users.Values, CancellationToken.None);
+            await _data.SaveUsersAsync(_users.Values, CancellationToken.None).ConfigureAwait(false);
             UnregisterEventHandlers();
         }
         finally
         {
-            if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("Exited");
+            NowLiveServiceLog.ServiceExited(_logger);
 
-            ServiceExited?.Invoke(this, new ServiceEventArguments(CancellationToken.None));
+            ServiceExited?.Invoke(this, new ServiceEventArgs(CancellationToken.None));
         }
     }
 
@@ -150,102 +189,119 @@ public sealed class NowLiveService(
         ServiceExited -= _broadcastState.OnServiceExited;
     }
 
+    /// <inheritdoc/>
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_logger.IsEnabled(LogLevel.Information))
-            _logger.LogInformation("Started");
+        NowLiveServiceLog.Started(_logger);
 
-        ServiceStarted?.Invoke(this, new ServiceEventArguments(cancellationToken));
+        ServiceStarted?.Invoke(this, new ServiceEventArgs(cancellationToken));
 
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task UpdateBroadcastStatesAsync(CancellationToken cancellationToken)
     {
-        var userBatches = _users.Values
-            .Select(user => user.UserData.Id)
-            .Chunk(_settings.MaxUsersPerRequest);
+        var userBatches = _users.Keys.Chunk(_settings.MaxUsersPerRequest);
 
         foreach (var batch in userBatches)
         {
-            var detectedLive = new List<TwitchStreamer>();
-            var endedBroadcasts = new List<TwitchStreamer>();
-            var continuingBroadcasts = new List<TwitchStreamer>();
-            var refreshDue = new List<TwitchStreamer>();
+            var detectedLive = new List<TrackedTwitchUser>();
+            var endedBroadcasts = new List<TrackedTwitchUser>();
+            var continuingBroadcasts = new List<TrackedTwitchUser>();
+            var refreshDue = new List<TrackedTwitchUser>();
 
             try
             {
-                var (twitchStreams, _) = await _streamsModule.GetStreamsAsync(
-                    new TwitchStreamRequest
-                    {
-                        UserIds = [.. batch],
-                        Type = "live"
-                    }, cancellationToken);
+                var liveStreamsPage = await ExecuteTwitchOperationAsync(
+                    ct => _twitchApiClient.Streams.GetStreamsAsync(
+                        userIds: batch,
+                        type: "live",
+                        first: batch.Length,
+                        cancellationToken: ct),
+                    $"polling live streams for {batch.Length} tracked user(s)",
+                    cancellationToken).ConfigureAwait(false);
 
-                var tasks = batch.Select(async userId =>
+                if (liveStreamsPage is null)
                 {
-                    if (_users.TryGetValue(userId, out var user))
+                    foreach (var userId in batch)
                     {
-                        user.StreamData = twitchStreams
-                            .FirstOrDefault(stream => stream.UserId == userId);
-
-                        await UpdateUserStateAsync(
-                            user, detectedLive, endedBroadcasts,
-                            continuingBroadcasts, refreshDue);
+                        var args = new Events.ErrorEventArgs(userId, "Broadcast state was not updated", new InvalidOperationException("Twitch stream polling failed."));
+                        UserBroadcastError?.Invoke(this, args);
                     }
-                });
 
-                await Task.WhenAll(tasks);
+                    continue;
+                }
+
+                var liveStreamsByUserId = liveStreamsPage.Data
+                    .ToDictionary(stream => stream.UserId, StringComparer.Ordinal);
+
+                foreach (var userId in batch)
+                {
+                    if (!_users.TryGetValue(userId, out var user))
+                    {
+                        continue;
+                    }
+
+                    user.RefreshStreamData(liveStreamsByUserId.GetValueOrDefault(userId));
+
+                    UpdateUserState(
+                        user,
+                        detectedLive,
+                        endedBroadcasts,
+                        continuingBroadcasts,
+                        refreshDue);
+                }
 
                 if (detectedLive.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = detectedLive };
+                    var args = new UsersEventArgs(cancellationToken) { Users = detectedLive };
                     BroadcastDetectedLive?.Invoke(this, args);
                 }
 
                 if (endedBroadcasts.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = endedBroadcasts };
+                    var args = new UsersEventArgs(cancellationToken) { Users = endedBroadcasts };
                     BroadcastEnded?.Invoke(this, args);
                 }
 
                 if (continuingBroadcasts.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = continuingBroadcasts };
+                    var args = new UsersEventArgs(cancellationToken) { Users = continuingBroadcasts };
                     BroadcastContinuing?.Invoke(this, args);
                 }
 
                 if (refreshDue.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = refreshDue };
+                    var args = new UsersEventArgs(cancellationToken) { Users = refreshDue };
                     BroadcastMediaRefreshDue?.Invoke(this, args);
                 }
             }
             catch (Exception exception)
             {
+                NowLiveServiceLog.BroadcastBatchFailed(_logger, exception, batch.Length);
+
                 foreach (var userId in batch)
                 {
-                    var args = new ErrorEventArguments(userId, _logMessages.Errors.WasNotUpdated, exception);
+                    var args = new Events.ErrorEventArgs(userId, "Broadcast state was not updated", exception);
                     UserBroadcastError?.Invoke(this, args);
                 }
             }
         }
         
-        await _data.SaveUsersAsync(_users.Values, cancellationToken);
+        await _data.SaveUsersAsync(_users.Values, cancellationToken).ConfigureAwait(false);
 
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug("{LogMessage}", _logMessages.UserWasSaved);
+        NowLiveServiceLog.UserDataSaved(_logger);
     }
 
-    private async Task UpdateUserStateAsync(
-        TwitchStreamer user,
-        List<TwitchStreamer> detectedLive,
-        List<TwitchStreamer> endedBroadcasts,
-        List<TwitchStreamer> continuingBroadcasts,
-        List<TwitchStreamer> refreshDue)
+    private void UpdateUserState(
+        TrackedTwitchUser user,
+        List<TrackedTwitchUser> detectedLive,
+        List<TrackedTwitchUser> endedBroadcasts,
+        List<TrackedTwitchUser> continuingBroadcasts,
+        List<TrackedTwitchUser> refreshDue)
     {
         bool isOnline = user.StreamData != null;
-        var now = DateTime.UtcNow;
+        var now = DateTimeOffset.UtcNow;
 
         if (isOnline)
         {
@@ -275,49 +331,67 @@ public sealed class NowLiveService(
         }
     }
 
+    /// <inheritdoc/>
     public async Task<UserManagementResult> AddUserAsync(
         string userLogin, 
         CancellationToken cancellationToken)
     {
-        var user = await _usersModule.GetUserAsync(userLogin, cancellationToken);
-
-        if (user == null)
+        try
         {
-            if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotFound, userLogin);
+            var normalizedUserLogin = userLogin.Trim();
 
-            return UserManagementResult.NotFound;
-        }
+            if (normalizedUserLogin.Length == 0)
+            {
+                NowLiveServiceLog.UserNotFound(_logger, userLogin);
 
-        var twitchStreamer = new TwitchStreamer
-        {
-            UserData = user,
-            StreamData = null,
-            LastOnline = null,
-            NextMediaRefresh = null
-        };
+                return UserManagementResult.NotFound;
+            }
 
-        if (_users.TryAdd(user.Id, twitchStreamer))
-        {
-            var args = new UsersEventArguments(cancellationToken) { Users = [twitchStreamer] };
-            UserAdded?.Invoke(this, args);
+            var users = await ExecuteTwitchOperationAsync(
+                ct => _twitchApiClient.Users.GetUsersAsync(logins: [normalizedUserLogin], cancellationToken: ct),
+                $"looking up Twitch user '{normalizedUserLogin}'",
+                cancellationToken)
+                .ConfigureAwait(false);
 
-            await _data.SaveUsersAsync(_users.Values, cancellationToken);
+            if (users is null)
+                return UserManagementResult.Error;
 
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("{LogMessage} ({Data})", _logMessages.UserWasSaved, userLogin);
+            var user = users.Count == 0 ? null : users[0];
 
-            return UserManagementResult.Success;
-        }
-        else
-        {
-            if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserExists, user.Id);
+            if (user == null)
+            {
+                NowLiveServiceLog.UserNotFound(_logger, normalizedUserLogin);
+
+                return UserManagementResult.NotFound;
+            }
+
+            var twitchStreamer = TrackedTwitchUser.Create(user);
+
+            if (_users.TryAdd(twitchStreamer.UserData.Id, twitchStreamer))
+            {
+                var args = new UsersEventArgs(cancellationToken) { Users = [twitchStreamer] };
+                UserAdded?.Invoke(this, args);
+
+                await _data.SaveUsersAsync(_users.Values, cancellationToken).ConfigureAwait(false);
+
+                NowLiveServiceLog.UserSavedForLogin(_logger, normalizedUserLogin);
+
+                return UserManagementResult.Success;
+            }
+
+            NowLiveServiceLog.UserAlreadyExists(_logger, twitchStreamer.UserData.Id);
 
             return UserManagementResult.AlreadyExists;
         }
+        catch (Exception exception)
+        {
+            NowLiveServiceLog.UserLookupFailed(_logger, exception, userLogin);
+
+            return UserManagementResult.Error;
+        }
     }
 
+    /// <inheritdoc/>
     public async Task<UserManagementResult> RemoveUserAsync(
         string userLogin, 
         CancellationToken cancellationToken)
@@ -329,30 +403,129 @@ public sealed class NowLiveService(
 
         if (userId == null)
         {
-            if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotFound, userLogin);
+            NowLiveServiceLog.UserNotFound(_logger, userLogin);
 
             return UserManagementResult.NotFound;
         }
 
         if (_users.TryRemove(userId, out var user))
         {
-            var args = new UsersEventArguments(cancellationToken) { Users = [user] };
+            var args = new UsersEventArgs(cancellationToken) { Users = [user] };
             UserRemoved?.Invoke(this, args);
 
-            await _data.SaveUsersAsync(_users.Values, cancellationToken);
+            await _data.SaveUsersAsync(_users.Values, cancellationToken).ConfigureAwait(false);
             return UserManagementResult.Success;
         }
 
-        if (_logger.IsEnabled(LogLevel.Error))
-            _logger.LogError("{LogMessage} ({Data})", _logMessages.Errors.UserWasNotRemoved, userId);
+        NowLiveServiceLog.UserNotRemoved(_logger, userId);
 
         return UserManagementResult.Error;
     }
 
     private async Task LoadUsersAsync(CancellationToken cancellationToken)
     {
-        foreach (var user in await _data.LoadUsersAsync(cancellationToken))
+        var persistedUsers = await _data.LoadUsersAsync(cancellationToken).ConfigureAwait(false);
+
+        var validUsers = persistedUsers
+            .Where(u => !string.IsNullOrEmpty(u.UserData.Id))
+            .ToList();
+
+        foreach (var user in validUsers)
             _users.TryAdd(user.UserData.Id, user);
+
+        foreach (var batch in validUsers.Chunk(_settings.MaxUsersPerRequest))
+        {
+            var userIds = batch.Select(user => user.UserData.Id).ToArray();
+            var refreshedUsers = await ExecuteTwitchOperationAsync(
+                ct => _twitchApiClient.Users.GetUsersAsync(ids: userIds, cancellationToken: ct),
+                $"rehydrating {batch.Length} tracked user(s)",
+                cancellationToken).ConfigureAwait(false);
+
+            if (refreshedUsers is null)
+                continue;
+
+            var refreshedUsersById = refreshedUsers
+                .ToDictionary(user => user.Id, StringComparer.Ordinal);
+
+            foreach (var trackedUser in batch)
+            {
+                if (refreshedUsersById.TryGetValue(trackedUser.UserData.Id, out var refreshedUser))
+                    trackedUser.RefreshUserData(refreshedUser);
+            }
+        }
     }
+
+    private async Task<T?> ExecuteTwitchOperationAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        string operationName,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        const int maxAttempts = 2;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                return await operation(cancellationToken).ConfigureAwait(false);
+            }
+            catch (TwitchApiException exception) when (attempt < maxAttempts && ShouldRetryTwitchOperation(exception))
+            {
+                LogTwitchApiFailure(operationName, exception);
+
+                var retryDelay = GetRetryDelay(exception);
+                NowLiveServiceLog.RetryingTwitchOperation(_logger, operationName, retryDelay);
+
+                await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TwitchApiException exception)
+            {
+                LogTwitchApiFailure(operationName, exception);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private void LogTwitchApiFailure(string operationName, TwitchApiException exception)
+    {
+        NowLiveServiceLog.TwitchOperationFailed(
+            _logger,
+            exception,
+            operationName,
+            exception.Code,
+            exception.StatusCode?.ToString(),
+            exception.Endpoint,
+            exception.IsRateLimited,
+            exception.IsUnauthorized,
+            exception.IsTransient);
+    }
+
+    private static TimeSpan GetRetryDelay(TwitchApiException exception)
+    {
+        if (exception.TryGetRetryDelay(out var retryDelay))
+            return retryDelay;
+
+        return exception.Code switch
+        {
+            TwitchErrorCodes.RateLimited or
+            TwitchErrorCodes.LocalRateLimitQueueFull or
+            TwitchErrorCodes.TooManyRequests => TimeSpan.FromSeconds(10),
+            TwitchErrorCodes.ServerError => TimeSpan.FromSeconds(5),
+            TwitchErrorCodes.NetworkError or
+            TwitchErrorCodes.Timeout => TimeSpan.FromSeconds(2),
+            _ when exception.IsTransient => TimeSpan.FromSeconds(2),
+            _ => TimeSpan.Zero
+        };
+    }
+
+    private static bool ShouldRetryTwitchOperation(TwitchApiException exception) =>
+        exception.Code is
+            TwitchErrorCodes.RateLimited or
+            TwitchErrorCodes.LocalRateLimitQueueFull or
+            TwitchErrorCodes.TooManyRequests or
+            TwitchErrorCodes.NetworkError or
+            TwitchErrorCodes.Timeout or
+            TwitchErrorCodes.ServerError;
 }

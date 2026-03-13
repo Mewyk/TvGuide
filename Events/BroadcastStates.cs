@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using TvGuide.Models;
 using TvGuide.Modules;
 
 namespace TvGuide.Events;
@@ -34,11 +34,9 @@ namespace TvGuide.Events;
 /// </remarks>
 public sealed class BroadcastStates(
     ILogger<BroadcastStates> logger,
-    IOptions<Configuration> settings,
     ActiveBroadcastsModule activeBroadcastsModule)
 {
     private readonly ILogger<BroadcastStates> _logger = logger;
-    private readonly LogMessages _logMessages = settings.Value.LogMessages;
     private readonly ActiveBroadcastsModule _activeBroadcasts = activeBroadcastsModule;
 
     /// <summary>
@@ -55,18 +53,16 @@ public sealed class BroadcastStates(
     /// 
     /// This design prevents duplicate messages when the app restarts.
     /// </remarks>
-    public async void OnBroadcastDetectedLive(object? sender, UsersEventArguments eventData)
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users detected as currently live.</param>
+    public async void OnBroadcastDetectedLive(object? sender, UsersEventArgs eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsOnline,
-                eventData.Users.Count);
+        BroadcastStatesLog.OnlineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessDetectedLiveAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessDetectedLiveAsync(UsersEventArguments eventData)
+    private async Task ProcessDetectedLiveAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -79,29 +75,23 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process online state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedOnlineStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
     /// <summary>
     /// Handles broadcasts that have ended.
     /// </summary>
-    public async void OnBroadcastEnded(object? sender, UsersEventArguments eventData)
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose broadcasts have ended.</param>
+    public async void OnBroadcastEnded(object? sender, UsersEventArgs eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsOffline,
-                eventData.Users.Count);
+        BroadcastStatesLog.OfflineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessEndedBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessEndedBroadcastsAsync(UsersEventArguments eventData)
+    private async Task ProcessEndedBroadcastsAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -112,29 +102,23 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process offline state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedOfflineStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
     /// <summary>
     /// Handles broadcasts that need media (preview image) refresh.
     /// </summary>
-    public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArguments eventData)
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose active broadcasts need refreshed preview media.</param>
+    public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArgs eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamMediaWasRefreshed,
-                eventData.Users.Count);
+        BroadcastStatesLog.MediaRefreshSummary(_logger, eventData.Users.Count);
 
         await ProcessMediaRefreshAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessMediaRefreshAsync(UsersEventArguments eventData)
+    private async Task ProcessMediaRefreshAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -147,20 +131,19 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process media refresh for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedMediaRefreshProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
-    public async void OnServiceStarting(object? sender, ServiceEventArguments eventData)
-    {
-        await ProcessServiceStartingAsync(eventData).ConfigureAwait(false);
-    }
+    /// <summary>
+    /// Handles the service-starting event by loading persisted state and rebuilding the status message.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Lifecycle data for the service start operation.</param>
+    public void OnServiceStarting(object? sender, ServiceEventArgs eventData) =>
+        ProcessServiceStartingAsync(eventData).GetAwaiter().GetResult();
 
-    private async Task ProcessServiceStartingAsync(ServiceEventArguments eventData)
+    private async Task ProcessServiceStartingAsync(ServiceEventArgs eventData)
     {
         try
         {
@@ -169,11 +152,16 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to process service starting");
+            BroadcastStatesLog.FailedServiceStarting(_logger, exception);
         }
     }
 
-    public void OnServiceExiting(object? sender, ServiceEventArguments eventData)
+    /// <summary>
+    /// Handles the service-exiting event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Lifecycle data for the service shutdown operation.</param>
+    public void OnServiceExiting(object? sender, ServiceEventArgs eventData)
     {
         // Data is already saved after each operation - no action needed
     }
@@ -181,18 +169,16 @@ public sealed class BroadcastStates(
     /// <summary>
     /// Handles broadcasts that are continuing with no state change.
     /// </summary>
-    public async void OnBroadcastContinuing(object? sender, UsersEventArguments eventData)
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose broadcasts are still live without changes.</param>
+    public async void OnBroadcastContinuing(object? sender, UsersEventArgs eventData)
     {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug(
-                "{LogMessage} (Total: {Count})",
-                _logMessages.StreamIsUnchanged,
-                eventData.Users.Count);
+        BroadcastStatesLog.ContinuingStateSummary(_logger, eventData.Users.Count);
 
         await ProcessContinuingBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessContinuingBroadcastsAsync(UsersEventArguments eventData)
+    private async Task ProcessContinuingBroadcastsAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -205,65 +191,95 @@ public sealed class BroadcastStates(
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(LogLevel.Error))
-                _logger.LogError(
-                    exception,
-                    "Failed to process unchanged state for {Count} users",
-                    eventData.Users.Count);
+            BroadcastStatesLog.FailedContinuingStateProcessing(_logger, exception, eventData.Users.Count);
         }
     }
 
+    /// <summary>
+    /// Handles the service-started event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Generic event data for the service start notification.</param>
     public void OnServiceStarted(object? sender, EventArgs eventData)
-        => _logger.LogDebug("Now Live service has started successfully");
+        => BroadcastStatesLog.ServiceStarted(_logger);
 
+    /// <summary>
+    /// Handles the service-exited event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Generic event data for the service exit notification.</param>
     public void OnServiceExited(object? sender, EventArgs eventData)
-        => _logger.LogDebug("Now Live service has exited");
+        => BroadcastStatesLog.ServiceExited(_logger);
 
-    public void OnUserAdded(object? sender, UsersEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug("{Count} user(s) added to tracking list", eventData.Users.Count);
-    }
+    /// <summary>
+    /// Handles the user-added event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users that were added to tracking.</param>
+    public void OnUserAdded(object? sender, UsersEventArgs eventData)
+        => BroadcastStatesLog.UsersAdded(_logger, eventData.Users.Count);
 
-    public void OnUserRemoved(object? sender, UsersEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Debug))
-            _logger.LogDebug("{Count} user(s) removed from tracking list", eventData.Users.Count);
-    }
+    /// <summary>
+    /// Handles the user-removed event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users that were removed from tracking.</param>
+    public void OnUserRemoved(object? sender, UsersEventArgs eventData)
+        => BroadcastStatesLog.UsersRemoved(_logger, eventData.Users.Count);
 
-    public void OnUserStreamError(object? sender, ErrorEventArguments eventData)
-    {
-        if (_logger.IsEnabled(LogLevel.Error))
-            _logger.LogError(
-                    eventData.Exception,
-                    "Error processing user stream - UserId: {UserId}, Message: {Message}",
-                    eventData.UserId, eventData.Message);
-    }
+    /// <summary>
+    /// Handles per-user broadcast processing errors.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Error details for the failed user update.</param>
+    public void OnUserStreamError(object? sender, ErrorEventArgs eventData)
+        => BroadcastStatesLog.UserStreamError(_logger, eventData.Exception, eventData.UserId, eventData.Message);
 }
 
 /// <summary>
 /// Service lifecycle event data.
 /// </summary>
-public sealed class ServiceEventArguments(CancellationToken cancellationToken) : EventArgs
+public sealed class ServiceEventArgs(CancellationToken cancellationToken) : EventArgs
 {
+    /// <summary>
+    /// Cancellation token associated with the lifecycle event.
+    /// </summary>
     public CancellationToken CancellationToken { get; } = cancellationToken;
 }
 
 /// <summary>
 /// Event data for Twitch streamers.
 /// </summary>
-public sealed class UsersEventArguments(CancellationToken cancellationToken) : EventArgs
+public sealed class UsersEventArgs(CancellationToken cancellationToken) : EventArgs
 {
-    public List<TwitchStreamer> Users { get; set; } = [];
+    /// <summary>
+    /// Users associated with the current event.
+    /// </summary>
+    public List<TrackedTwitchUser> Users { get; set; } = [];
+
+    /// <summary>
+    /// Cancellation token associated with the current processing operation.
+    /// </summary>
     public CancellationToken CancellationToken { get; } = cancellationToken;
 }
 
 /// <summary>
 /// Error event data for stream processing.
 /// </summary>
-public sealed class ErrorEventArguments(string userId, string message, Exception exception) : EventArgs
+public sealed class ErrorEventArgs(string userId, string message, Exception exception) : EventArgs
 {
+    /// <summary>
+    /// Twitch user ID that failed during processing.
+    /// </summary>
     public string UserId { get; } = userId;
+
+    /// <summary>
+    /// Error message associated with the failure.
+    /// </summary>
     public string Message { get; } = message;
+
+    /// <summary>
+    /// Exception thrown while processing the user.
+    /// </summary>
     public Exception Exception { get; } = exception;
 }

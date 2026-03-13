@@ -1,8 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NetCord;
-using NetCord.Gateway;
 using NetCord.Hosting.Gateway;
 using NetCord.Hosting.Services;
 using NetCord.Hosting.Services.ApplicationCommands;
@@ -11,49 +10,34 @@ using TvGuide;
 using TvGuide.Events;
 using TvGuide.Modules;
 using TvGuide.Services;
+using TwitchSharp.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
-    .AddOptions<Configuration>()
-    .Bind(builder.Configuration)
-    .ValidateDataAnnotations();
+    .AddSingleton<IValidateOptions<Configuration>, ConfigurationValidator>();
 
 builder.Services
-    .AddHttpClient();
+    .AddOptions<Configuration>()
+    .Bind(builder.Configuration)
+    .ValidateOnStart();
+
+builder.AddTwitchApi();
 
 builder.Services
     .AddApplicationCommands<SlashCommandInteraction, ApplicationCommandContext>();
 
 builder.Services
-    .AddSingleton<IAuthenticationModule, AuthenticationModule>()
-    .AddSingleton<INowLiveService, NowLiveService>()
+    .AddSingleton<NowLiveService>()
+    .AddSingleton<INowLiveService>(static serviceProvider => serviceProvider.GetRequiredService<NowLiveService>())
+    .AddHostedService(static serviceProvider => serviceProvider.GetRequiredService<NowLiveService>())
     .AddSingleton<DataModule>()
     .AddSingleton<ActiveBroadcastsModule>()
     .AddSingleton<BroadcastStates>();
 
 builder.Services
-    .AddScoped<IStreamsModule, StreamsModule>()
-    .AddScoped<IClipsModule, ClipsModule>()
-    .AddScoped<IUsersModule, UsersModule>();
-
-builder.Services
-    .AddHostedService<TokenRefreshService>()
-    .AddHostedService<NowLiveService>();
-
-builder.Services
-    .AddDiscordGateway(options =>
-    {
-        options.Intents =
-            GatewayIntents.GuildMessages |
-            GatewayIntents.GuildMessageReactions |
-            GatewayIntents.MessageContent;
-    })
+    .AddDiscordGateway()
     .AddGatewayHandlers(typeof(Program).Assembly);
-
-builder.Services
-    .AddLogging(configure => configure
-        .AddConsole());
 
 var host = builder.Build()
     .AddModules(typeof(Program).Assembly);
