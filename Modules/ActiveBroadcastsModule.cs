@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetCord;
 using NetCord.Rest;
+using TvGuide.Models;
 
 namespace TvGuide.Modules;
 
@@ -27,20 +28,18 @@ namespace TvGuide.Modules;
 /// <para><b>Persistence:</b></para>
 /// Broadcast data (without Discord component objects) is saved to JSON.
 /// On restart, LoadDataAsync restores broadcast list and message ID.
-/// Components are rebuilt from TwitchUser/TwitchBroadcast data on each update.
+/// Components are rebuilt from persisted user/stream snapshots on each update.
 /// </remarks>
 public sealed class ActiveBroadcastsModule(
     IOptions<Configuration> settings,
     ILogger<ActiveBroadcastsModule> logger,
-    RestClient restClient,
-    HttpClient httpClient) : IDisposable
+    RestClient restClient) : IDisposable
 {
     private readonly RestClient _restClient = restClient;
-    private readonly HttpClient _httpClient = httpClient;
     private readonly Settings.NowLive _settings = settings.Value.NowLive;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private readonly ILogger<ActiveBroadcastsModule> _logger = logger;
-    private Broadcasts _activeBroadcasts = new();
+    private ActiveBroadcastsState _activeBroadcasts = new();
 
     /// <summary>
     /// Loads persisted broadcast data from the configured file into memory.
@@ -67,11 +66,16 @@ public sealed class ActiveBroadcastsModule(
             }
 
             _activeBroadcasts = await JsonSerializer
-                .DeserializeAsync<Broadcasts>(fileStream, cancellationToken: cancellationToken)
+                .DeserializeAsync<ActiveBroadcastsState>(fileStream, cancellationToken: cancellationToken)
                 .ConfigureAwait(false) ?? new();
 
             _activeBroadcasts.ActiveBroadcasts ??= [];
-            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts.OrderBy(b => b.StreamData?.StartedAt ?? DateTime.MaxValue)];
+            _activeBroadcasts.ActiveBroadcasts =
+            [
+                .. _activeBroadcasts.ActiveBroadcasts
+                    .Where(broadcast => !string.IsNullOrEmpty(broadcast.UserData.Id))
+                    .OrderBy(broadcast => broadcast.StreamData?.StartedAt ?? DateTimeOffset.MaxValue)
+            ];
 
             ActiveBroadcastsModuleLog.BroadcastsLoaded(_logger, _activeBroadcasts.ActiveBroadcasts.Count);
         }
@@ -110,32 +114,33 @@ public sealed class ActiveBroadcastsModule(
     /// Ensures the status message is rebuilt on startup to sync with current state.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the rebuild operation.</param>
-    public async Task EnsureStatusMessageExistsAsync(CancellationToken cancellationToken)
-    {
-        await RebuildBroadcastMessageAsync(cancellationToken);
-    }
+    public async Task EnsureStatusMessageExistsAsync(CancellationToken cancellationToken) 
+        => await RebuildBroadcastMessageAsync(cancellationToken);
 
     /// <summary>
     /// Adds a new broadcast and rebuilds the single Discord message.
     /// </summary>
     /// <param name="twitchStreamer">Streamer data to add to the active broadcast message.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
-    public async Task CreateBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
+    public async Task CreateBroadcastMessageAsync(TrackedTwitchUser twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
         {
             ArgumentNullException.ThrowIfNull(twitchStreamer.StreamData);
 
-            _activeBroadcasts.ActiveBroadcasts.Add(new Broadcasts.BroadcastData
+            _activeBroadcasts.ActiveBroadcasts.Add(new ActiveBroadcastEntry
             {
                 UserData = twitchStreamer.UserData,
                 StreamData = twitchStreamer.StreamData,
-                LastUpdated = DateTime.UtcNow
+                LastUpdated = DateTimeOffset.UtcNow
             });
 
-            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts
-                .OrderBy(broadcast => broadcast.StreamData?.StartedAt ?? DateTime.MaxValue)];
+            _activeBroadcasts.ActiveBroadcasts =
+            [
+                .. _activeBroadcasts.ActiveBroadcasts
+                    .OrderBy(broadcast => broadcast.StreamData?.StartedAt ?? DateTimeOffset.MaxValue)
+            ];
 
             if (_activeBroadcasts.ActiveBroadcasts.Count > 10)
             {
@@ -155,7 +160,7 @@ public sealed class ActiveBroadcastsModule(
     /// </summary>
     /// <param name="twitchStreamer">Streamer data identifying the broadcast to remove.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
-    public async Task RemoveBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
+    public async Task RemoveBroadcastMessageAsync(TrackedTwitchUser twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
         try
@@ -210,7 +215,7 @@ public sealed class ActiveBroadcastsModule(
     /// <param name="twitchStreamer">Streamer data containing the latest broadcast state.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task UpdateBroadcastMessageAsync(
-        TwitchStreamer twitchStreamer,
+        TrackedTwitchUser twitchStreamer,
         CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
@@ -224,15 +229,18 @@ public sealed class ActiveBroadcastsModule(
             if (broadcast == null)
             {
                 ActiveBroadcastsModuleLog.BroadcastNotFoundForUpdate(_logger, twitchStreamer.UserData.Id);
-
                 return;
             }
 
             broadcast.UserData = twitchStreamer.UserData;
             broadcast.StreamData = twitchStreamer.StreamData;
-            broadcast.LastUpdated = DateTime.UtcNow;
+            broadcast.LastUpdated = DateTimeOffset.UtcNow;
 
-            _activeBroadcasts.ActiveBroadcasts = [.. _activeBroadcasts.ActiveBroadcasts.OrderBy(activeBroadcast => activeBroadcast.StreamData?.StartedAt ?? DateTime.MaxValue)];
+            _activeBroadcasts.ActiveBroadcasts =
+            [
+                .. _activeBroadcasts.ActiveBroadcasts
+                    .OrderBy(activeBroadcast => activeBroadcast.StreamData?.StartedAt ?? DateTimeOffset.MaxValue)
+            ];
 
             await RebuildBroadcastMessageAsync(cancellationToken);
         }
@@ -241,7 +249,7 @@ public sealed class ActiveBroadcastsModule(
 
     /// <summary>
     /// Rebuilds the entire broadcast message with all active broadcasts and summary.
-    /// Creates a new message or modifies the existing message stored in <see cref="Broadcasts.ActiveBroadcastsMessageId"/>.
+    /// Creates a new message or modifies the existing message stored in <see cref="ActiveBroadcastsState.ActiveBroadcastsMessageId"/>.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the rebuild operation.</param>
     private async Task RebuildBroadcastMessageAsync(CancellationToken cancellationToken)
@@ -305,7 +313,7 @@ public sealed class ActiveBroadcastsModule(
     /// </summary>
     /// <param name="twitchStreamer">Streamer data to locate in the tracked broadcast list.</param>
     /// <returns><see langword="true"/> when the streamer already has a tracked message entry; otherwise, <see langword="false"/>.</returns>
-    public bool IsMessageTracked(TwitchStreamer twitchStreamer) =>
+    public bool IsMessageTracked(TrackedTwitchUser twitchStreamer) =>
         _activeBroadcasts.ActiveBroadcasts.Any(broadcast => broadcast.UserData.Id == twitchStreamer.UserData.Id);
 
     /// <summary>
@@ -315,7 +323,7 @@ public sealed class ActiveBroadcastsModule(
     /// </summary>
     /// <param name="broadcast">Broadcast data for the streamer.</param>
     /// <returns>A configured <see cref="ComponentContainerProperties"/> representing the broadcast.</returns>
-    private ComponentContainerProperties CreateBroadcastContainer(Broadcasts.BroadcastData broadcast)
+    private ComponentContainerProperties CreateBroadcastContainer(ActiveBroadcastEntry broadcast)
     {
         ArgumentNullException.ThrowIfNull(broadcast.StreamData);
 
@@ -336,7 +344,7 @@ public sealed class ActiveBroadcastsModule(
                 new ComponentSectionProperties(
                     new LinkButtonProperties(streamUrl, "Watch Stream"))
                     .AddComponents(
-                        new TextDisplayProperties($"🎮 {broadcast.StreamData.GameName} | 👥 {broadcast.StreamData.ViewerCount} viewers | Started <t:{new DateTimeOffset(broadcast.StreamData.StartedAt).ToUnixTimeSeconds()}:R>")
+                        new TextDisplayProperties($"🎮 {broadcast.StreamData.GameName} | 👥 {broadcast.StreamData.ViewerCount} viewers | Started <t:{broadcast.StreamData.StartedAt.ToUnixTimeSeconds()}:R>")
                     )
             );
 
@@ -353,11 +361,11 @@ public sealed class ActiveBroadcastsModule(
     /// </remarks>
     /// <param name="broadcast">Broadcast data for the finished stream.</param>
     /// <returns>A configured <see cref="ComponentContainerProperties"/> for the offline broadcast.</returns>
-    private ComponentContainerProperties CreateOfflineContainer(Broadcasts.BroadcastData broadcast)
+    private ComponentContainerProperties CreateOfflineContainer(ActiveBroadcastEntry broadcast)
     {
         ArgumentNullException.ThrowIfNull(broadcast.StreamData);
 
-        var duration = FormatDuration(DateTime.UtcNow - broadcast.StreamData.StartedAt);
+        var duration = FormatDuration(DateTimeOffset.UtcNow - broadcast.StreamData.StartedAt);
 
         var thumbnailUrl = broadcast.UserData.ProfileImageUrl;
 
@@ -386,7 +394,6 @@ public sealed class ActiveBroadcastsModule(
     private List<IMessageComponentProperties> CreateSummaryComponents()
     {
         var components = new List<IMessageComponentProperties>();
-        var lastChecked = DateTime.UtcNow;
 
         if (_activeBroadcasts.ActiveBroadcasts.Count == 0)
         {
@@ -399,7 +406,7 @@ public sealed class ActiveBroadcastsModule(
             var streamerList = string.Join("\n", _activeBroadcasts.ActiveBroadcasts
                 .Select(b => $"• [{b.UserData.DisplayName}](https://www.twitch.tv/{b.UserData.Login})"));
             var lastUpdated = _activeBroadcasts.ActiveBroadcasts.Max(b => b.LastUpdated);
-            components.Add(new TextDisplayProperties($"## Active Streams\n{_activeBroadcasts.ActiveBroadcasts.Count} stream(s) currently active\n\n{streamerList}\n\nLast updated <t:{new DateTimeOffset(lastUpdated).ToUnixTimeSeconds()}:R>"));
+            components.Add(new TextDisplayProperties($"## Active Streams\n{_activeBroadcasts.ActiveBroadcasts.Count} stream(s) currently active\n\n{streamerList}\n\nLast updated <t:{lastUpdated.ToUnixTimeSeconds()}:R>"));
         }
 
         return components;
@@ -441,45 +448,4 @@ public sealed class ActiveBroadcastsModule(
     /// Releases the semaphore used to serialize broadcast-message updates.
     /// </summary>
     public void Dispose() => _semaphore.Dispose();
-}
-
-/// <summary>
-/// Active broadcasts tracked in a single Discord message.
-/// </summary>
-/// <remarks>
-/// Discord Components V2 limits: 10 containers max, 40 total components max per message.
-/// Each broadcast = 1 container. Summary = additional components (not containerized).
-/// </remarks>
-public sealed class Broadcasts
-{
-    /// <summary>
-    /// Discord message ID containing all active broadcasts.
-    /// </summary>
-    public ulong ActiveBroadcastsMessageId { get; set; }
-
-    /// <summary>
-    /// Active broadcast data.
-    /// </summary>
-    public List<BroadcastData> ActiveBroadcasts { get; set; } = [];
-
-    /// <summary>
-    /// Broadcast data for a single streamer.
-    /// </summary>
-    public sealed class BroadcastData
-    {
-        /// <summary>
-        /// Persisted Twitch user profile information for the broadcast.
-        /// </summary>
-        public required TwitchUser UserData { get; set; }
-
-        /// <summary>
-        /// Current live-stream data when the user is online; otherwise <see langword="null"/>.
-        /// </summary>
-        public required TwitchBroadcast? StreamData { get; set; }
-
-        /// <summary>
-        /// UTC timestamp when this broadcast entry was last refreshed.
-        /// </summary>
-        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
-    }
 }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using NetCord;
 
 namespace TvGuide;
@@ -5,27 +6,22 @@ namespace TvGuide;
 /// <summary>
 /// Root application configuration.
 /// </summary>
-public sealed record Configuration
+public sealed class Configuration
 {
     /// <summary>
     /// Discord client settings.
     /// </summary>
-    public required Settings.Discord Discord { get; init; }
-
-    /// <summary>
-    /// Twitch API settings.
-    /// </summary>
-    public required Settings.Twitch Twitch { get; init; }
+    public Settings.Discord Discord { get; set; } = new();
 
     /// <summary>
     /// Now Live monitoring and presentation settings.
     /// </summary>
-    public required Settings.NowLive NowLive { get; init; }
+    public Settings.NowLive NowLive { get; set; } = new();
 
     /// <summary>
     /// User-facing command and error strings.
     /// </summary>
-    public required LogMessages LogMessages { get; init; } = new();
+    public LogMessages LogMessages { get; set; } = new();
 }
 
 /// <summary>
@@ -36,209 +32,189 @@ public static class Settings
     /// <summary>
     /// Discord connection settings.
     /// </summary>
-    public sealed record Discord
+    public sealed class Discord
     {
         /// <summary>
         /// Discord bot token.
         /// </summary>
-        public required string Token { get; init; }
+        public string Token { get; set; } = string.Empty;
 
         /// <summary>
         /// Gateway intents enabled for the Discord client.
         /// </summary>
-        public required string[] Intents { get; init; }
-    }
-
-    /// <summary>
-    /// Twitch integration settings.
-    /// </summary>
-    public sealed record Twitch
-    {
-        /// <summary>
-        /// OAuth client credentials for Twitch.
-        /// </summary>
-        public required TwitchAuthentication Authentication { get; init; }
-
-        /// <summary>
-        /// Twitch access-token refresh settings.
-        /// </summary>
-        public required TwitchToken Token { get; init; }
-    }
-
-    /// <summary>
-    /// Twitch OAuth client credentials.
-    /// </summary>
-    public sealed record TwitchAuthentication
-    {
-        /// <summary>
-        /// Twitch application client identifier.
-        /// </summary>
-        public required string ClientId { get; init; }
-
-        /// <summary>
-        /// Twitch application client secret.
-        /// </summary>
-        public required string ClientSecret { get; init; }
-    }
-
-    /// <summary>
-    /// Settings that control Twitch access-token refresh behavior.
-    /// </summary>
-    public sealed record TwitchToken
-    {
-        /// <summary>
-        /// Number of seconds subtracted from token expiry when deciding whether a token is still usable.
-        /// </summary>
-        public int TokenExpirationBuffer { get; init; } = 300;
-
-        /// <summary>
-        /// Configured refresh interval, in seconds, for refreshing Twitch access tokens.
-        /// </summary>
-        public int TokenRefreshInterval { get; init; } = 1800;
-
-        /// <summary>
-        /// Configured retry delay, in seconds, for token refresh failures.
-        /// </summary>
-        public int TokenRetryDelay { get; init; } = 60;
-
-        /// <summary>
-        /// Maximum retry count considered when calculating token-refresh backoff.
-        /// </summary>
-        public int TokenMaxRetries { get; init; } = 3;
-
-        /// <summary>
-        /// Maximum delay between token refresh retries.
-        /// </summary>
-        public TimeSpan TokenMaxDelay { get; init; } = TimeSpan.FromMinutes(5);
-
-        /// <summary>
-        /// Delay between successful token refresh checks.
-        /// </summary>
-        public TimeSpan TokenNormalDelay { get; init; } = TimeSpan.FromMinutes(10);
+        public string[] Intents { get; set; } = [];
     }
 
     /// <summary>
     /// Settings for monitoring and publishing live Twitch broadcasts.
     /// </summary>
-    public sealed record NowLive
+    public sealed class NowLive
     {
         /// <summary>
         /// Discord guild identifier that hosts the broadcast channel.
         /// </summary>
-        public required ulong GuildId { get; init; }
+        public ulong GuildId { get; set; }
 
         /// <summary>
         /// Discord channel identifier where broadcast updates are posted.
         /// </summary>
-        public required ulong ChannelId { get; init; }
+        public ulong ChannelId { get; set; }
 
         /// <summary>
         /// File path used to persist tracked-user data.
         /// </summary>
-        public string UserDataFile { get; init; } = "NowLiveUserData.json";
+        public string UserDataFile { get; set; } = "NowLiveUserData.json";
 
         /// <summary>
         /// File path used to persist active broadcast message state.
         /// </summary>
-        public string ActiveBroadcastsFile { get; init; } = "ActiveBroadcasts.json";
+        public string ActiveBroadcastsFile { get; set; } = "ActiveBroadcasts.json";
 
         /// <summary>
         /// Interval, in seconds, between live-status checks.
         /// </summary>
-        public int UpdateInterval { get; init; } = 60;
+        public int UpdateInterval { get; set; } = 60;
 
         /// <summary>
         /// Interval, in minutes, between preview-image refreshes for active broadcasts.
         /// </summary>
-        public int MediaRefreshInterval { get; init; } = 6;
+        public int MediaRefreshInterval { get; set; } = 6;
 
         /// <summary>
         /// Maximum number of Twitch users requested in a single batch.
         /// </summary>
-        public int MaxUsersPerRequest { get; init; } = 100;
+        public int MaxUsersPerRequest { get; set; } = 100;
 
         /// <summary>
         /// Footer icon URL used in broadcast messaging.
         /// </summary>
-        public required string FooterIcon { get; init; }
+        public string FooterIcon { get; set; } = string.Empty;
 
         /// <summary>
         /// Slash-command response settings for Now Live commands.
         /// </summary>
-        public NowLiveCommands NowLiveCommands { get; init; } = new();
+        public NowLiveCommands NowLiveCommands { get; set; } = new();
 
         /// <summary>
         /// Accent colors used for online and offline broadcast states.
         /// </summary>
-        public required StatusColor StatusColor { get; init; }
+        public StatusColor StatusColor { get; set; } = new();
     }
 
     /// <summary>
     /// Accent colors used for broadcast status displays.
     /// </summary>
-    public sealed record StatusColor
+    public sealed class StatusColor
     {
         /// <summary>
         /// Color applied to active or online broadcasts.
         /// </summary>
-        public required int Online { get; init; }
+        public int Online { get; set; }
 
         /// <summary>
         /// Color applied to offline or finished broadcasts.
         /// </summary>
-        public required int Offline { get; init; }
+        public int Offline { get; set; }
     }
 
     /// <summary>
     /// Settings for Now Live slash-command responses.
     /// </summary>
-    public sealed record NowLiveCommands
+    public sealed class NowLiveCommands
     {
         /// <summary>
         /// Flags applied to interaction responses returned by command handlers.
         /// </summary>
-        public MessageFlags MessageFlag { get; init; } = MessageFlags.Ephemeral;
+        public MessageFlags MessageFlag { get; set; } = MessageFlags.Ephemeral;
     }
 }
 
 /// <summary>
 /// Localized command and error strings.
 /// </summary>
-public sealed record LogMessages
+public sealed class LogMessages
 {
     /// <summary>
     /// Localized error strings used in command responses.
     /// </summary>
-    public GeneralError Errors { get; init; } = new();
+    public GeneralError Errors { get; set; } = new();
 
     /// <summary>
     /// Message shown when a user is added to tracking.
     /// </summary>
-    public string UserWasAdded { get; init; } = "User data was added";
+    public string UserWasAdded { get; set; } = "User data was added";
 
     /// <summary>
     /// Message shown when a user is removed from tracking.
     /// </summary>
-    public string UserWasRemoved { get; init; } = "User data was removed";
+    public string UserWasRemoved { get; set; } = "User data was removed";
 
     /// <summary>
     /// Localized error strings.
     /// </summary>
-    public sealed record GeneralError
+    public sealed class GeneralError
     {
         /// <summary>
         /// Fallback error message for unexpected failures.
         /// </summary>
-        public string Default { get; init; } = "An error has occurred";
+        public string Default { get; set; } = "An error has occurred";
 
         /// <summary>
         /// Error message shown when a Twitch user cannot be found.
         /// </summary>
-        public string UserWasNotFound { get; init; } = "User was not found";
+        public string UserWasNotFound { get; set; } = "User was not found";
 
         /// <summary>
         /// Error message shown when a tracked user already exists.
         /// </summary>
-        public string UserExists { get; init; } = "User exists";
+        public string UserExists { get; set; } = "User exists";
+    }
+}
+
+/// <summary>
+/// Validates application configuration that is owned by TvGuide.
+/// </summary>
+public sealed class ConfigurationValidator : IValidateOptions<Configuration>
+{
+    /// <inheritdoc />
+    public ValidateOptionsResult Validate(string? name, Configuration options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        List<string> failures = [];
+
+        if (options.NowLive.GuildId == 0)
+            failures.Add("NowLive:GuildId must be greater than 0.");
+
+        if (options.NowLive.ChannelId == 0)
+            failures.Add("NowLive:ChannelId must be greater than 0.");
+
+        if (string.IsNullOrWhiteSpace(options.NowLive.UserDataFile))
+            failures.Add("NowLive:UserDataFile is required.");
+
+        if (string.IsNullOrWhiteSpace(options.NowLive.ActiveBroadcastsFile))
+            failures.Add("NowLive:ActiveBroadcastsFile is required.");
+
+        if (options.NowLive.UpdateInterval <= 0)
+            failures.Add("NowLive:UpdateInterval must be greater than 0.");
+
+        if (options.NowLive.MediaRefreshInterval <= 0)
+            failures.Add("NowLive:MediaRefreshInterval must be greater than 0.");
+
+        if (options.NowLive.MaxUsersPerRequest is < 1 or > 100)
+            failures.Add("NowLive:MaxUsersPerRequest must be between 1 and 100.");
+
+        if (string.IsNullOrWhiteSpace(options.NowLive.FooterIcon))
+        {
+            failures.Add("NowLive:FooterIcon is required.");
+        }
+        else if (!Uri.TryCreate(options.NowLive.FooterIcon, UriKind.Absolute, out _))
+        {
+            failures.Add("NowLive:FooterIcon must be an absolute URI.");
+        }
+
+        return failures.Count == 0
+            ? ValidateOptionsResult.Success
+            : ValidateOptionsResult.Fail(failures);
     }
 }

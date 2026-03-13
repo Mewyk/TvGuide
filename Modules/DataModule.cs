@@ -1,14 +1,19 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TvGuide.Models;
 
 namespace TvGuide.Modules;
 
 /// <summary>
 /// Thread-safe persistence for tracked user data.
 /// </summary>
-public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
+public sealed class DataModule(
+    IOptions<Configuration> settings,
+    ILogger<DataModule> logger) : IDisposable
 {
     private readonly string _filePath = settings.Value.NowLive.UserDataFile;
+    private readonly ILogger<DataModule> _logger = logger;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     /// <summary>
@@ -16,7 +21,7 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the load operation.</param>
     /// <returns>The persisted tracked users, or an empty list when no data exists.</returns>
-    public async Task<List<TwitchStreamer>> LoadUsersAsync(CancellationToken cancellationToken)
+    public async Task<List<TrackedTwitchUser>> LoadUsersAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -28,8 +33,18 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
             if (stream.Length == 0) 
                 return [];
 
-            var users = await JsonSerializer.DeserializeAsync<List<TwitchStreamer>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var users = await JsonSerializer.DeserializeAsync<List<TrackedTwitchUser>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
             return users ?? [];
+        }
+        catch (JsonException exception)
+        {
+            DataModuleLog.FailedToLoadUsers(_logger, exception, _filePath);
+            return [];
+        }
+        catch (NotSupportedException exception)
+        {
+            DataModuleLog.FailedToLoadUsers(_logger, exception, _filePath);
+            return [];
         }
         finally 
         { 
@@ -42,7 +57,7 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
     /// </summary>
     /// <param name="users">Users to persist to the configured file.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the save operation.</param>
-    public async Task SaveUsersAsync(IEnumerable<TwitchStreamer> users, CancellationToken cancellationToken)
+    public async Task SaveUsersAsync(IEnumerable<TrackedTwitchUser> users, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

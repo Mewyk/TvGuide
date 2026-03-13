@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using TvGuide.Models;
 using TvGuide.Modules;
 
 namespace TvGuide.Events;
@@ -139,10 +140,8 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Lifecycle data for the service start operation.</param>
-    public async void OnServiceStarting(object? sender, ServiceEventArgs eventData)
-    {
-        await ProcessServiceStartingAsync(eventData).ConfigureAwait(false);
-    }
+    public void OnServiceStarting(object? sender, ServiceEventArgs eventData) =>
+        ProcessServiceStartingAsync(eventData).GetAwaiter().GetResult();
 
     private async Task ProcessServiceStartingAsync(ServiceEventArgs eventData)
     {
@@ -256,7 +255,7 @@ public sealed class UsersEventArgs(CancellationToken cancellationToken) : EventA
     /// <summary>
     /// Users associated with the current event.
     /// </summary>
-    public List<TwitchStreamer> Users { get; set; } = [];
+    public List<TrackedTwitchUser> Users { get; set; } = [];
 
     /// <summary>
     /// Cancellation token associated with the current processing operation.

@@ -4,7 +4,7 @@ using NetCord.Rest;
 using NetCord.Services;
 using NetCord.Services.ApplicationCommands;
 using TvGuide.Attributes;
-using TvGuide.Modules;
+using TvGuide.Models;
 
 namespace TvGuide.Commands;
 
