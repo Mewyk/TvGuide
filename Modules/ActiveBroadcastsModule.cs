@@ -352,13 +352,9 @@ public sealed class ActiveBroadcastsModule(
     }
 
     /// <summary>
-    /// Creates a compact container representing an offline/finished broadcast.
-    /// The container shows the streamer's profile thumbnail and stream duration with a link to the channel.
+    /// Creates a compact container representing an offline or finished broadcast.
+    /// The container shows only a linked username and the stream duration.
     /// </summary>
-    /// <remarks>
-    /// The thumbnail for offline containers intentionally uses the user's profile image rather than
-    /// the channel's offline image to ensure a consistent small thumbnail appearance.
-    /// </remarks>
     /// <param name="broadcast">Broadcast data for the finished stream.</param>
     /// <returns>A configured <see cref="ComponentContainerProperties"/> for the offline broadcast.</returns>
     private ComponentContainerProperties CreateOfflineContainer(ActiveBroadcastEntry broadcast)
@@ -367,28 +363,15 @@ public sealed class ActiveBroadcastsModule(
 
         var duration = FormatDuration(DateTimeOffset.UtcNow - broadcast.StreamData.StartedAt);
 
-        var thumbnailUrl = broadcast.UserData.ProfileImageUrl;
-
-        var sectionThumbnail = new ComponentSectionProperties(
-            new ComponentSectionThumbnailProperties(new ComponentMediaProperties(thumbnailUrl)))
-            .AddComponents(
-                new TextDisplayProperties($"**{broadcast.UserData.DisplayName} finished streaming**")
-            );
-
-        var sectionLink = new ComponentSectionProperties(
-            new LinkButtonProperties($"https://www.twitch.tv/{broadcast.UserData.Login}", "View Channel"))
-            .AddComponents(
-                new TextDisplayProperties($"Stream Duration: {duration}")
-            );
-
         return new ComponentContainerProperties()
             .WithAccentColor(new NetCord.Color(_settings.StatusColor.Offline))
-            .AddComponents(sectionThumbnail, sectionLink);
+            .AddComponents(
+                new TextDisplayProperties($"## [{broadcast.UserData.DisplayName}](https://www.twitch.tv/{broadcast.UserData.Login}) finished streaming\nStream Duration: {duration}"));
     }
 
     /// <summary>
     /// Creates summary components (not containerized) shown at the bottom of the message.
-    /// When no streams are active, the summary indicates that and omits a "last updated" timestamp.
+    /// When no streams are active, the summary indicates that and still includes a "last checked" timestamp.
     /// </summary>
     /// <returns>A list of components to append to the broadcast message.</returns>
     private List<IMessageComponentProperties> CreateSummaryComponents()
