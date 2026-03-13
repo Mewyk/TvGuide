@@ -4,13 +4,13 @@ namespace TvGuide.Events;
 
 internal static partial class BroadcastStatesLog
 {
-    [LoggerMessage(EventId = 1500, Level = LogLevel.Debug, Message = "Stream is now online (Total: {Count})")]
+    [LoggerMessage(EventId = 1500, Level = LogLevel.Debug, Message = "Broadcast is now online (Total: {Count})")]
     public static partial void OnlineStateSummary(ILogger logger, int count);
 
     [LoggerMessage(EventId = 1501, Level = LogLevel.Error, Message = "Failed to process online state for {Count} users")]
     public static partial void FailedOnlineStateProcessing(ILogger logger, Exception exception, int count);
 
-    [LoggerMessage(EventId = 1502, Level = LogLevel.Debug, Message = "Stream is now offline (Total: {Count})")]
+    [LoggerMessage(EventId = 1502, Level = LogLevel.Debug, Message = "Broadcast is now offline (Total: {Count})")]
     public static partial void OfflineStateSummary(ILogger logger, int count);
 
     [LoggerMessage(EventId = 1503, Level = LogLevel.Error, Message = "Failed to process offline state for {Count} users")]
@@ -25,7 +25,7 @@ internal static partial class BroadcastStatesLog
     [LoggerMessage(EventId = 1506, Level = LogLevel.Error, Message = "Failed to process service starting")]
     public static partial void FailedServiceStarting(ILogger logger, Exception exception);
 
-    [LoggerMessage(EventId = 1507, Level = LogLevel.Debug, Message = "Stream has not changed from online (Total: {Count})")]
+    [LoggerMessage(EventId = 1507, Level = LogLevel.Debug, Message = "Broadcast has not changed from online (Total: {Count})")]
     public static partial void ContinuingStateSummary(ILogger logger, int count);
 
     [LoggerMessage(EventId = 1508, Level = LogLevel.Error, Message = "Failed to process unchanged state for {Count} users")]

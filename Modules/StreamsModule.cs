@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TvGuide.Twitch;
 
@@ -13,13 +12,11 @@ namespace TvGuide.Modules;
 public sealed class StreamsModule(
     HttpClient httpClient,
     IAuthenticationModule authService,
-    IOptions<Configuration> settings,
-    ILogger<StreamsModule> logger)
+    IOptions<Configuration> settings)
     : IStreamsModule
 {
     private readonly IAuthenticationModule _authService = authService;
     private readonly Settings.Twitch _settings = settings.Value.Twitch;
-    private readonly ILogger<StreamsModule> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
 
     /// <inheritdoc/>
