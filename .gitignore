@@ -400,3 +400,5 @@ FodyWeavers.xsd
 *.sln.iml
 
 Production/
+/.github
+Documents/MasterPlan/Policies.md
