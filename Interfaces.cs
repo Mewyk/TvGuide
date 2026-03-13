@@ -40,7 +40,7 @@ public interface IStreamsModule
     /// <param name="parameters">Request parameters used to filter and paginate the query.</param>
     /// <param name="cancellationToken">Cancellation token to cancel the request.</param>
     /// <returns>A page of streams and the cursor for the next page, if any.</returns>
-    Task<(IReadOnlyList<TwitchStream> Streams, string? NextCursor)> GetStreamsAsync(
+    Task<(IReadOnlyList<TwitchBroadcast> Streams, string? NextCursor)> GetStreamsAsync(
         TwitchStreamRequest parameters,
         CancellationToken cancellationToken = default);
 
@@ -50,7 +50,7 @@ public interface IStreamsModule
     /// <param name="parameters">Request parameters used to filter the query.</param>
     /// <param name="cancellationToken">Cancellation token to cancel enumeration.</param>
     /// <returns>An async sequence of all matching streams.</returns>
-    IAsyncEnumerable<TwitchStream> GetAllStreamsAsync(
+    IAsyncEnumerable<TwitchBroadcast> GetAllStreamsAsync(
         TwitchStreamRequest parameters,
         CancellationToken cancellationToken = default);
 }

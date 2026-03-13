@@ -27,7 +27,7 @@ namespace TvGuide.Modules;
 /// <para><b>Persistence:</b></para>
 /// Broadcast data (without Discord component objects) is saved to JSON.
 /// On restart, LoadDataAsync restores broadcast list and message ID.
-/// Components are rebuilt from TwitchUser/TwitchStream data on each update.
+/// Components are rebuilt from TwitchUser/TwitchBroadcast data on each update.
 /// </remarks>
 public sealed class ActiveBroadcastsModule(
     IOptions<Configuration> settings,
@@ -475,7 +475,7 @@ public sealed class Broadcasts
         /// <summary>
         /// Current live-stream data when the user is online; otherwise <see langword="null"/>.
         /// </summary>
-        public required TwitchStream? StreamData { get; set; }
+        public required TwitchBroadcast? StreamData { get; set; }
 
         /// <summary>
         /// UTC timestamp when this broadcast entry was last refreshed.

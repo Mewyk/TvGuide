@@ -63,62 +63,62 @@ public sealed class NowLiveService(
     /// <summary>
     /// Raised when tracked users are detected as live during a polling cycle.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? BroadcastDetectedLive;
+    public event EventHandler<UsersEventArgs>? BroadcastDetectedLive;
 
     /// <summary>
     /// Raised when tracked users transition from live to offline.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? BroadcastEnded;
+    public event EventHandler<UsersEventArgs>? BroadcastEnded;
 
     /// <summary>
     /// Raised when tracked users remain live with no state change.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? BroadcastContinuing;
+    public event EventHandler<UsersEventArgs>? BroadcastContinuing;
 
     /// <summary>
     /// Raised when active broadcasts require preview-media refresh.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? BroadcastMediaRefreshDue;
+    public event EventHandler<UsersEventArgs>? BroadcastMediaRefreshDue;
 
     // Service lifecycle event handlers
     /// <summary>
     /// Raised before persisted state is loaded during service startup.
     /// </summary>
-    public event EventHandler<ServiceEventArguments>? ServiceStarting;
+    public event EventHandler<ServiceEventArgs>? ServiceStarting;
 
     /// <summary>
     /// Raised after the service has started.
     /// </summary>
-    public event EventHandler<ServiceEventArguments>? ServiceStarted;
+    public event EventHandler<ServiceEventArgs>? ServiceStarted;
 
     /// <summary>
     /// Raised when the service is shutting down and cleanup is beginning.
     /// </summary>
-    public event EventHandler<ServiceEventArguments>? ServiceExiting;
+    public event EventHandler<ServiceEventArgs>? ServiceExiting;
 
     /// <summary>
     /// Raised after the service has completed shutdown.
     /// </summary>
-    public event EventHandler<ServiceEventArguments>? ServiceExited;
+    public event EventHandler<ServiceEventArgs>? ServiceExited;
 
     // Single user event handlers
     /// <summary>
     /// Raised when a user is added to the tracking list.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? UserAdded;
+    public event EventHandler<UsersEventArgs>? UserAdded;
 
     /// <summary>
     /// Raised when a user is removed from the tracking list.
     /// </summary>
-    public event EventHandler<UsersEventArguments>? UserRemoved;
+    public event EventHandler<UsersEventArgs>? UserRemoved;
 
     /// <summary>
     /// Raised when processing a user's broadcast state results in an exception.
     /// </summary>
-    public event EventHandler<ErrorEventArguments>? UserBroadcastError;
+    public event EventHandler<Events.ErrorEventArgs>? UserBroadcastError;
 
     /// <inheritdoc/>
-    protected override async Task ExecuteAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using PeriodicTimer periodicTimer = 
             new(TimeSpan.FromSeconds(_settings.UpdateInterval));
@@ -129,18 +129,18 @@ public sealed class NowLiveService(
 
             RegisterEventHandlers();
 
-            ServiceStarting?.Invoke(this, new ServiceEventArguments(cancellationToken));
+            ServiceStarting?.Invoke(this, new ServiceEventArgs(stoppingToken));
 
-            await LoadUsersAsync(cancellationToken);
+            await LoadUsersAsync(stoppingToken);
 
-            while (await periodicTimer.WaitForNextTickAsync(cancellationToken))
-                await UpdateBroadcastStatesAsync(cancellationToken);
+            while (await periodicTimer.WaitForNextTickAsync(stoppingToken))
+                await UpdateBroadcastStatesAsync(stoppingToken);
         }
         catch (OperationCanceledException)
         {
             NowLiveServiceLog.ServiceExiting(_logger);
 
-            ServiceExiting?.Invoke(this, new ServiceEventArguments(cancellationToken));
+            ServiceExiting?.Invoke(this, new ServiceEventArgs(stoppingToken));
 
             await _data.SaveUsersAsync(_users.Values, CancellationToken.None);
             UnregisterEventHandlers();
@@ -149,7 +149,7 @@ public sealed class NowLiveService(
         {
             NowLiveServiceLog.ServiceExited(_logger);
 
-            ServiceExited?.Invoke(this, new ServiceEventArguments(CancellationToken.None));
+            ServiceExited?.Invoke(this, new ServiceEventArgs(CancellationToken.None));
         }
     }
 
@@ -192,7 +192,7 @@ public sealed class NowLiveService(
     {
         NowLiveServiceLog.Started(_logger);
 
-        ServiceStarted?.Invoke(this, new ServiceEventArguments(cancellationToken));
+        ServiceStarted?.Invoke(this, new ServiceEventArgs(cancellationToken));
 
         await base.StartAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -236,25 +236,25 @@ public sealed class NowLiveService(
 
                 if (detectedLive.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = detectedLive };
+                    var args = new UsersEventArgs(cancellationToken) { Users = detectedLive };
                     BroadcastDetectedLive?.Invoke(this, args);
                 }
 
                 if (endedBroadcasts.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = endedBroadcasts };
+                    var args = new UsersEventArgs(cancellationToken) { Users = endedBroadcasts };
                     BroadcastEnded?.Invoke(this, args);
                 }
 
                 if (continuingBroadcasts.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = continuingBroadcasts };
+                    var args = new UsersEventArgs(cancellationToken) { Users = continuingBroadcasts };
                     BroadcastContinuing?.Invoke(this, args);
                 }
 
                 if (refreshDue.Count != 0)
                 {
-                    var args = new UsersEventArguments(cancellationToken) { Users = refreshDue };
+                    var args = new UsersEventArgs(cancellationToken) { Users = refreshDue };
                     BroadcastMediaRefreshDue?.Invoke(this, args);
                 }
             }
@@ -262,7 +262,7 @@ public sealed class NowLiveService(
             {
                 foreach (var userId in batch)
                 {
-                    var args = new ErrorEventArguments(userId, "Broadcast state was not updated", exception);
+                    var args = new Events.ErrorEventArgs(userId, "Broadcast state was not updated", exception);
                     UserBroadcastError?.Invoke(this, args);
                 }
             }
@@ -335,7 +335,7 @@ public sealed class NowLiveService(
 
         if (_users.TryAdd(user.Id, twitchStreamer))
         {
-            var args = new UsersEventArguments(cancellationToken) { Users = [twitchStreamer] };
+            var args = new UsersEventArgs(cancellationToken) { Users = [twitchStreamer] };
             UserAdded?.Invoke(this, args);
 
             await _data.SaveUsersAsync(_users.Values, cancellationToken);
@@ -371,7 +371,7 @@ public sealed class NowLiveService(
 
         if (_users.TryRemove(userId, out var user))
         {
-            var args = new UsersEventArguments(cancellationToken) { Users = [user] };
+            var args = new UsersEventArgs(cancellationToken) { Users = [user] };
             UserRemoved?.Invoke(this, args);
 
             await _data.SaveUsersAsync(_users.Values, cancellationToken);

@@ -54,14 +54,14 @@ public sealed class BroadcastStates(
     /// </remarks>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users detected as currently live.</param>
-    public async void OnBroadcastDetectedLive(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastDetectedLive(object? sender, UsersEventArgs eventData)
     {
         BroadcastStatesLog.OnlineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessDetectedLiveAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessDetectedLiveAsync(UsersEventArguments eventData)
+    private async Task ProcessDetectedLiveAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -83,14 +83,14 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users whose broadcasts have ended.</param>
-    public async void OnBroadcastEnded(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastEnded(object? sender, UsersEventArgs eventData)
     {
         BroadcastStatesLog.OfflineStateSummary(_logger, eventData.Users.Count);
 
         await ProcessEndedBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessEndedBroadcastsAsync(UsersEventArguments eventData)
+    private async Task ProcessEndedBroadcastsAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -110,14 +110,14 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users whose active broadcasts need refreshed preview media.</param>
-    public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArgs eventData)
     {
         BroadcastStatesLog.MediaRefreshSummary(_logger, eventData.Users.Count);
 
         await ProcessMediaRefreshAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessMediaRefreshAsync(UsersEventArguments eventData)
+    private async Task ProcessMediaRefreshAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -139,12 +139,12 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Lifecycle data for the service start operation.</param>
-    public async void OnServiceStarting(object? sender, ServiceEventArguments eventData)
+    public async void OnServiceStarting(object? sender, ServiceEventArgs eventData)
     {
         await ProcessServiceStartingAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessServiceStartingAsync(ServiceEventArguments eventData)
+    private async Task ProcessServiceStartingAsync(ServiceEventArgs eventData)
     {
         try
         {
@@ -162,7 +162,7 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Lifecycle data for the service shutdown operation.</param>
-    public void OnServiceExiting(object? sender, ServiceEventArguments eventData)
+    public void OnServiceExiting(object? sender, ServiceEventArgs eventData)
     {
         // Data is already saved after each operation - no action needed
     }
@@ -172,14 +172,14 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users whose broadcasts are still live without changes.</param>
-    public async void OnBroadcastContinuing(object? sender, UsersEventArguments eventData)
+    public async void OnBroadcastContinuing(object? sender, UsersEventArgs eventData)
     {
         BroadcastStatesLog.ContinuingStateSummary(_logger, eventData.Users.Count);
 
         await ProcessContinuingBroadcastsAsync(eventData).ConfigureAwait(false);
     }
 
-    private async Task ProcessContinuingBroadcastsAsync(UsersEventArguments eventData)
+    private async Task ProcessContinuingBroadcastsAsync(UsersEventArgs eventData)
     {
         try
         {
@@ -217,7 +217,7 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users that were added to tracking.</param>
-    public void OnUserAdded(object? sender, UsersEventArguments eventData)
+    public void OnUserAdded(object? sender, UsersEventArgs eventData)
         => BroadcastStatesLog.UsersAdded(_logger, eventData.Users.Count);
 
     /// <summary>
@@ -225,7 +225,7 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Users that were removed from tracking.</param>
-    public void OnUserRemoved(object? sender, UsersEventArguments eventData)
+    public void OnUserRemoved(object? sender, UsersEventArgs eventData)
         => BroadcastStatesLog.UsersRemoved(_logger, eventData.Users.Count);
 
     /// <summary>
@@ -233,14 +233,14 @@ public sealed class BroadcastStates(
     /// </summary>
     /// <param name="sender">The event source.</param>
     /// <param name="eventData">Error details for the failed user update.</param>
-    public void OnUserStreamError(object? sender, ErrorEventArguments eventData)
+    public void OnUserStreamError(object? sender, ErrorEventArgs eventData)
         => BroadcastStatesLog.UserStreamError(_logger, eventData.Exception, eventData.UserId, eventData.Message);
 }
 
 /// <summary>
 /// Service lifecycle event data.
 /// </summary>
-public sealed class ServiceEventArguments(CancellationToken cancellationToken) : EventArgs
+public sealed class ServiceEventArgs(CancellationToken cancellationToken) : EventArgs
 {
     /// <summary>
     /// Cancellation token associated with the lifecycle event.
@@ -251,7 +251,7 @@ public sealed class ServiceEventArguments(CancellationToken cancellationToken) :
 /// <summary>
 /// Event data for Twitch streamers.
 /// </summary>
-public sealed class UsersEventArguments(CancellationToken cancellationToken) : EventArgs
+public sealed class UsersEventArgs(CancellationToken cancellationToken) : EventArgs
 {
     /// <summary>
     /// Users associated with the current event.
@@ -267,7 +267,7 @@ public sealed class UsersEventArguments(CancellationToken cancellationToken) : E
 /// <summary>
 /// Error event data for stream processing.
 /// </summary>
-public sealed class ErrorEventArguments(string userId, string message, Exception exception) : EventArgs
+public sealed class ErrorEventArgs(string userId, string message, Exception exception) : EventArgs
 {
     /// <summary>
     /// Twitch user ID that failed during processing.

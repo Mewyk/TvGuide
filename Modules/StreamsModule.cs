@@ -23,7 +23,7 @@ public sealed class StreamsModule(
     private readonly HttpClient _httpClient = httpClient;
 
     /// <inheritdoc/>
-    public async Task<(IReadOnlyList<TwitchStream> Streams, string? NextCursor)> GetStreamsAsync(
+    public async Task<(IReadOnlyList<TwitchBroadcast> Streams, string? NextCursor)> GetStreamsAsync(
         TwitchStreamRequest parameters,
         CancellationToken cancellationToken = default)
     {
@@ -56,7 +56,7 @@ public sealed class StreamsModule(
     }
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<TwitchStream> GetAllStreamsAsync(
+    public async IAsyncEnumerable<TwitchBroadcast> GetAllStreamsAsync(
         TwitchStreamRequest parameters,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -188,13 +188,13 @@ public sealed record TwitchStreamRequest
 /// <param name="Data">Streams returned by the query.</param>
 /// <param name="Pagination">Pagination metadata for continuing the query.</param>
 public sealed record TwitchStreamsResponse(
-    [property: JsonPropertyName("data")] IReadOnlyList<TwitchStream> Data,
+    [property: JsonPropertyName("data")] IReadOnlyList<TwitchBroadcast> Data,
     [property: JsonPropertyName("pagination")] Pagination? Pagination);
 
 /// <summary>
 /// Twitch live stream with metadata and viewer information.
 /// </summary>
-public sealed record TwitchStream
+public sealed record TwitchBroadcast
 {
     /// <summary>
     /// Stream ID for VOD lookup.

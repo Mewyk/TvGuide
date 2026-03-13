@@ -163,7 +163,7 @@ public sealed record TwitchStreamer
     /// <summary>
     /// Current live-stream data when the streamer is online; otherwise <see langword="null"/>.
     /// </summary>
-    public required TwitchStream? StreamData { get; set; }
+    public required TwitchBroadcast? StreamData { get; set; }
 
     /// <summary>
     /// Indicates whether the streamer is currently considered live.

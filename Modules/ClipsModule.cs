@@ -177,7 +177,7 @@ public sealed record TwitchClipRequest
         if (After is { Length: > 0 })
             parameters.Add($"after={After}");
         if (IsFeatured.HasValue)
-            parameters.Add($"is_featured={IsFeatured.Value.ToString().ToLower()}");
+            parameters.Add($"is_featured={IsFeatured.Value.ToString().ToLower(System.Globalization.CultureInfo.CurrentCulture)}");
 
         return string.Join("&", parameters);
     }
