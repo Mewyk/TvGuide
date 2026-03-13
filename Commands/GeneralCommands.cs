@@ -8,6 +8,9 @@ using TvGuide.Modules;
 
 namespace TvGuide.Commands;
 
+/// <summary>
+/// Slash commands for managing the tracked Twitch streamer list.
+/// </summary>
 [DynamicSlashCommand("CommandAddLiveUser")]
 public sealed class TvGuideCommandsModule(
     INowLiveService nowLiveService,
@@ -24,6 +27,11 @@ public sealed class TvGuideCommandsModule(
         Flags = _settings.MessageFlag
     };
 
+    /// <summary>
+    /// Adds a Twitch streamer to the tracking list.
+    /// </summary>
+    /// <param name="username">The Twitch login name to add.</param>
+    /// <returns>An interaction response describing the result of the add operation.</returns>
     [DynamicSubSlashCommand("SubCommandAddLiveUser")]
     public async Task<InteractionMessageProperties> AddStreamerCommand(
         [DynamicSlashCommandParameter("CommandParametersAddLiveUser")] string username)
@@ -38,6 +46,11 @@ public sealed class TvGuideCommandsModule(
                 _ => CreateMessage(_logMessages.Errors.Default)
             };
 
+    /// <summary>
+    /// Removes a Twitch streamer from the tracking list.
+    /// </summary>
+    /// <param name="username">The Twitch login name to remove.</param>
+    /// <returns>An interaction response describing the result of the remove operation.</returns>
     [RequireUserPermissions<ApplicationCommandContext>(Permissions.ManageMessages)]
     [DynamicSubSlashCommand("SubCommandRemoveLiveUser")]
     public async Task<InteractionMessageProperties> RemoveStreamerCommand(

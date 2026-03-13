@@ -4,8 +4,12 @@ using NetCord.Services.ApplicationCommands;
 namespace TvGuide.Attributes;
 
 /// <summary>
-/// Command attribute variables loaded from configuration.
+/// Provides access to command attribute variables loaded from <c>AttributeVariables.json</c>.
 /// </summary>
+/// <remarks>
+/// The configuration is loaded lazily on first access. Missing files, unreadable content, and
+/// deserialization failures all fall back to an empty variable map.
+/// </remarks>
 public static class AttributeConfiguration
 {
     private static readonly Lazy<Dictionary<string, CommandAttributeVariable>> _variables = new(() =>
@@ -26,15 +30,24 @@ public static class AttributeConfiguration
     });
 
     /// <summary>
-    /// Gets attribute variable by key, or null if not found.
+    /// Gets the configured attribute variable identified by <paramref name="key"/>.
     /// </summary>
+    /// <param name="key">The configuration key to look up.</param>
+    /// <returns>
+    /// The matching <see cref="CommandAttributeVariable"/> when the key exists; otherwise,
+    /// <see langword="null"/>.
+    /// </returns>
     public static CommandAttributeVariable? GetVariable(string key) =>
         _variables.Value.TryGetValue(key, out var variable) ? variable : null;
 }
 
 /// <summary>
-/// Dynamic sub slash command with name and description from configuration.
+/// Applies a sub slash command name and description resolved from <see cref="AttributeConfiguration"/>.
 /// </summary>
+/// <remarks>
+/// When the configured variable cannot be found, the command name falls back to the supplied key
+/// and the description falls back to an empty string.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class DynamicSubSlashCommandAttribute(
     string variableKey) 
@@ -52,8 +65,12 @@ public sealed class DynamicSubSlashCommandAttribute(
 }
 
 /// <summary>
-/// Dynamic slash command with name and description from configuration.
+/// Applies a slash command name and description resolved from <see cref="AttributeConfiguration"/>.
 /// </summary>
+/// <remarks>
+/// When the configured variable cannot be found, the command name falls back to the supplied key
+/// and the description falls back to an empty string.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class DynamicSlashCommandAttribute(
     string variableKey) 
@@ -71,11 +88,20 @@ public sealed class DynamicSlashCommandAttribute(
 }
 
 /// <summary>
-/// Dynamic slash command parameter with properties from configuration.
+/// Applies slash command parameter metadata resolved from <see cref="AttributeConfiguration"/>.
 /// </summary>
+/// <remarks>
+/// When a configured variable is found, this attribute copies the configured name, description,
+/// numeric bounds, and length bounds onto the underlying <see cref="SlashCommandParameterAttribute"/>.
+/// If no variable is found, the inherited default values remain unchanged.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Parameter)]
 public sealed class DynamicSlashCommandParameterAttribute : SlashCommandParameterAttribute
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DynamicSlashCommandParameterAttribute"/> class.
+    /// </summary>
+    /// <param name="variableKey">The configuration key for the parameter metadata to load.</param>
     public DynamicSlashCommandParameterAttribute(string variableKey)
     {
         var variable = AttributeConfiguration.GetVariable(variableKey);
@@ -96,14 +122,37 @@ public sealed class DynamicSlashCommandParameterAttribute : SlashCommandParamete
 }
 
 /// <summary>
-/// Configuration values for dynamic command attributes.
+/// Represents the configurable values used to populate dynamic command attributes.
 /// </summary>
 public sealed record CommandAttributeVariable
 {
+    /// <summary>
+    /// Gets the command or parameter name to apply.
+    /// </summary>
     public string Name { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the description text to apply.
+    /// </summary>
     public string Description { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the optional maximum numeric value allowed for the parameter.
+    /// </summary>
     public double? MaxValue { get; init; }
+
+    /// <summary>
+    /// Gets the optional minimum numeric value allowed for the parameter.
+    /// </summary>
     public double? MinValue { get; init; }
+
+    /// <summary>
+    /// Gets the optional maximum string length allowed for the parameter.
+    /// </summary>
     public int? MaxLength { get; init; }
+
+    /// <summary>
+    /// Gets the optional minimum string length allowed for the parameter.
+    /// </summary>
     public int? MinLength { get; init; }
 }

@@ -5,6 +5,9 @@ using Microsoft.Extensions.Options;
 
 namespace TvGuide.Modules;
 
+/// <summary>
+/// Retrieves Twitch user profiles from the Helix users endpoint.
+/// </summary>
 public sealed class UsersModule(
     HttpClient httpClient,
     IAuthenticationModule authService,
@@ -17,6 +20,7 @@ public sealed class UsersModule(
     private readonly ILogger<UsersModule> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
 
+    /// <inheritdoc/>
     public async Task<TwitchUser?> GetUserAsync(string userLogin, CancellationToken cancellationToken = default)
     {
         var token = await _authService.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
@@ -32,10 +36,7 @@ public sealed class UsersModule(
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (_logger.IsEnabled(LogLevel.Error))
             {
-                _logger.LogError(
-                    "Failed to get user info: {StatusCode} - {Content}",
-                    response.StatusCode,
-                    errorContent);
+                Log.FailedToGetUserInfo(_logger, response.StatusCode, errorContent);
             }
 
             return null;
@@ -50,11 +51,18 @@ public sealed class UsersModule(
     }
 
     private static string GetBaseUrl(string endpoint) => $"https://api.twitch.tv/helix/{endpoint}";
+
+    private static partial class Log
+    {
+        [LoggerMessage(EventId = 1400, Level = LogLevel.Error, Message = "Failed to get user info: {StatusCode} - {Content}")]
+        public static partial void FailedToGetUserInfo(ILogger logger, System.Net.HttpStatusCode statusCode, string content);
+    }
 }
 
 /// <summary>
 /// Twitch users API response.
 /// </summary>
+/// <param name="Data">Users returned by the query.</param>
 public sealed record TwitchUserResponse(
     [property: JsonPropertyName("data")] IReadOnlyList<TwitchUser> Data);
 
@@ -130,9 +138,24 @@ public sealed record TwitchUser
 /// </summary>
 public enum UserManagementResult
 {
+    /// <summary>
+    /// The requested user could not be found.
+    /// </summary>
     NotFound = 0,
+
+    /// <summary>
+    /// The operation completed successfully.
+    /// </summary>
     Success = 1,
+
+    /// <summary>
+    /// The user is already being tracked.
+    /// </summary>
     AlreadyExists = 2,
+
+    /// <summary>
+    /// The operation failed unexpectedly.
+    /// </summary>
     Error = 3
 }
 
@@ -141,9 +164,28 @@ public enum UserManagementResult
 /// </summary>
 public sealed record TwitchStreamer
 {
+    /// <summary>
+    /// Twitch user profile information for the tracked streamer.
+    /// </summary>
     public required TwitchUser UserData { get; set; }
+
+    /// <summary>
+    /// Current live-stream data when the streamer is online; otherwise <see langword="null"/>.
+    /// </summary>
     public required TwitchStream? StreamData { get; set; }
+
+    /// <summary>
+    /// Indicates whether the streamer is currently considered live.
+    /// </summary>
     public bool IsLive { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when the streamer was last observed online.
+    /// </summary>
     public DateTime? LastOnline { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when the next preview-image refresh should occur.
+    /// </summary>
     public DateTime? NextMediaRefresh { get; set; }
 }

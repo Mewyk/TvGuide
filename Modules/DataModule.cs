@@ -14,6 +14,8 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
     /// <summary>
     /// Loads tracked streamers, or empty list if file doesn't exist.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the load operation.</param>
+    /// <returns>The persisted tracked users, or an empty list when no data exists.</returns>
     public async Task<List<TwitchStreamer>> LoadUsersAsync(CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -38,6 +40,8 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
     /// <summary>
     /// Saves tracked streamers.
     /// </summary>
+    /// <param name="users">Users to persist to the configured file.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the save operation.</param>
     public async Task SaveUsersAsync(IEnumerable<TwitchStreamer> users, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -52,5 +56,8 @@ public sealed class DataModule(IOptions<Configuration> settings) : IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases the semaphore used to serialize user-data persistence.
+    /// </summary>
     public void Dispose() => _semaphore.Dispose();
 }

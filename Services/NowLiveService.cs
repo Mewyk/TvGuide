@@ -61,23 +61,64 @@ public sealed class NowLiveService(
     private readonly BroadcastStates _broadcastState = broadcastState;
 
     // Bulk event handlers
+    /// <summary>
+    /// Raised when tracked users are detected as live during a polling cycle.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? BroadcastDetectedLive;
+
+    /// <summary>
+    /// Raised when tracked users transition from live to offline.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? BroadcastEnded;
+
+    /// <summary>
+    /// Raised when tracked users remain live with no state change.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? BroadcastContinuing;
+
+    /// <summary>
+    /// Raised when active broadcasts require preview-media refresh.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? BroadcastMediaRefreshDue;
 
     // Service lifecycle event handlers
+    /// <summary>
+    /// Raised before persisted state is loaded during service startup.
+    /// </summary>
     public event EventHandler<ServiceEventArguments>? ServiceStarting;
+
+    /// <summary>
+    /// Raised after the service has started.
+    /// </summary>
     public event EventHandler<ServiceEventArguments>? ServiceStarted;
+
+    /// <summary>
+    /// Raised when the service is shutting down and cleanup is beginning.
+    /// </summary>
     public event EventHandler<ServiceEventArguments>? ServiceExiting;
+
+    /// <summary>
+    /// Raised after the service has completed shutdown.
+    /// </summary>
     public event EventHandler<ServiceEventArguments>? ServiceExited;
 
     // Single user event handlers
+    /// <summary>
+    /// Raised when a user is added to the tracking list.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? UserAdded;
+
+    /// <summary>
+    /// Raised when a user is removed from the tracking list.
+    /// </summary>
     public event EventHandler<UsersEventArguments>? UserRemoved;
 
+    /// <summary>
+    /// Raised when processing a user's broadcast state results in an exception.
+    /// </summary>
     public event EventHandler<ErrorEventArguments>? UserBroadcastError;
 
+    /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
         using PeriodicTimer periodicTimer = 
@@ -150,6 +191,7 @@ public sealed class NowLiveService(
         ServiceExited -= _broadcastState.OnServiceExited;
     }
 
+    /// <inheritdoc/>
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         if (_logger.IsEnabled(LogLevel.Information))
@@ -275,6 +317,7 @@ public sealed class NowLiveService(
         }
     }
 
+    /// <inheritdoc/>
     public async Task<UserManagementResult> AddUserAsync(
         string userLogin, 
         CancellationToken cancellationToken)
@@ -318,6 +361,7 @@ public sealed class NowLiveService(
         }
     }
 
+    /// <inheritdoc/>
     public async Task<UserManagementResult> RemoveUserAsync(
         string userLogin, 
         CancellationToken cancellationToken)

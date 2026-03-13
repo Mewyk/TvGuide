@@ -7,6 +7,9 @@ using TvGuide.Twitch;
 
 namespace TvGuide.Modules;
 
+/// <summary>
+/// Retrieves live-stream data from the Twitch Helix streams endpoint.
+/// </summary>
 public sealed class StreamsModule(
     HttpClient httpClient,
     IAuthenticationModule authService,
@@ -19,6 +22,7 @@ public sealed class StreamsModule(
     private readonly ILogger<StreamsModule> _logger = logger;
     private readonly HttpClient _httpClient = httpClient;
 
+    /// <inheritdoc/>
     public async Task<(IReadOnlyList<TwitchStream> Streams, string? NextCursor)> GetStreamsAsync(
         TwitchStreamRequest parameters,
         CancellationToken cancellationToken = default)
@@ -51,6 +55,7 @@ public sealed class StreamsModule(
             : (result.Data, result.Pagination?.Cursor);
     }
 
+    /// <inheritdoc/>
     public async IAsyncEnumerable<TwitchStream> GetAllStreamsAsync(
         TwitchStreamRequest parameters,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -108,15 +113,50 @@ public sealed class StreamsModule(
 /// </summary>
 public sealed record TwitchStreamRequest
 {
+    /// <summary>
+    /// Broadcaster user IDs to query. Maximum 100 values.
+    /// </summary>
     public IReadOnlyList<string>? UserIds { get; init; }
+
+    /// <summary>
+    /// Broadcaster login names to query. Maximum 100 values.
+    /// </summary>
     public IReadOnlyList<string>? UserLogins { get; init; }
+
+    /// <summary>
+    /// Category or game IDs to filter by. Maximum 100 values.
+    /// </summary>
     public IReadOnlyList<string>? GameIds { get; init; }
+
+    /// <summary>
+    /// Stream type filter. Supported values are <c>all</c> and <c>live</c>.
+    /// </summary>
     public string? Type { get; init; }
+
+    /// <summary>
+    /// Stream languages to filter by. Maximum 100 values.
+    /// </summary>
     public IReadOnlyList<string>? Languages { get; init; }
+
+    /// <summary>
+    /// Maximum number of results to return per page. Valid range: 1 to 100.
+    /// </summary>
     public int First { get; init; } = 20;
+
+    /// <summary>
+    /// Pagination cursor for retrieving the previous page.
+    /// </summary>
     public string? Before { get; init; }
+
+    /// <summary>
+    /// Pagination cursor for retrieving the next page.
+    /// </summary>
     public string? After { get; init; }
 
+    /// <summary>
+    /// Converts the request parameters into a Twitch Helix query string.
+    /// </summary>
+    /// <returns>A URL query string without a leading question mark.</returns>
     public string ToQueryString()
     {
         var parameters = new List<string>();
@@ -143,8 +183,10 @@ public sealed record TwitchStreamRequest
 }
 
 /// <summary>
-/// Twitch streams API response with pagination.
+/// Twitch streams API response payload.
 /// </summary>
+/// <param name="Data">Streams returned by the query.</param>
+/// <param name="Pagination">Pagination metadata for continuing the query.</param>
 public sealed record TwitchStreamsResponse(
     [property: JsonPropertyName("data")] IReadOnlyList<TwitchStream> Data,
     [property: JsonPropertyName("pagination")] Pagination? Pagination);
@@ -196,12 +238,21 @@ public sealed record TwitchStream
     [JsonPropertyName("type")]
     public required string Type { get; init; }
 
+    /// <summary>
+    /// Current stream title.
+    /// </summary>
     [JsonPropertyName("title")]
     public required string Title { get; init; }
 
+    /// <summary>
+    /// Custom stream tags applied to the broadcast.
+    /// </summary>
     [JsonPropertyName("tags")]
     public required string[] Tags { get; init; }
 
+    /// <summary>
+    /// Current concurrent viewer count.
+    /// </summary>
     [JsonPropertyName("viewer_count")]
     public required int ViewerCount { get; init; }
 
@@ -223,6 +274,9 @@ public sealed record TwitchStream
     [JsonPropertyName("thumbnail_url")]
     public required string ThumbnailUrl { get; init; }
 
+    /// <summary>
+    /// Indicates whether the stream is marked as mature content.
+    /// </summary>
     [JsonPropertyName("is_mature")]
     public required bool IsMature { get; init; }
 }

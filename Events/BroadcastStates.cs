@@ -55,6 +55,8 @@ public sealed class BroadcastStates(
     /// 
     /// This design prevents duplicate messages when the app restarts.
     /// </remarks>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users detected as currently live.</param>
     public async void OnBroadcastDetectedLive(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -90,6 +92,8 @@ public sealed class BroadcastStates(
     /// <summary>
     /// Handles broadcasts that have ended.
     /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose broadcasts have ended.</param>
     public async void OnBroadcastEnded(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -123,6 +127,8 @@ public sealed class BroadcastStates(
     /// <summary>
     /// Handles broadcasts that need media (preview image) refresh.
     /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose active broadcasts need refreshed preview media.</param>
     public async void OnBroadcastMediaRefreshDue(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -155,6 +161,11 @@ public sealed class BroadcastStates(
         }
     }
 
+    /// <summary>
+    /// Handles the service-starting event by loading persisted state and rebuilding the status message.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Lifecycle data for the service start operation.</param>
     public async void OnServiceStarting(object? sender, ServiceEventArguments eventData)
     {
         await ProcessServiceStartingAsync(eventData).ConfigureAwait(false);
@@ -173,6 +184,11 @@ public sealed class BroadcastStates(
         }
     }
 
+    /// <summary>
+    /// Handles the service-exiting event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Lifecycle data for the service shutdown operation.</param>
     public void OnServiceExiting(object? sender, ServiceEventArguments eventData)
     {
         // Data is already saved after each operation - no action needed
@@ -181,6 +197,8 @@ public sealed class BroadcastStates(
     /// <summary>
     /// Handles broadcasts that are continuing with no state change.
     /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users whose broadcasts are still live without changes.</param>
     public async void OnBroadcastContinuing(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -213,24 +231,49 @@ public sealed class BroadcastStates(
         }
     }
 
+    /// <summary>
+    /// Handles the service-started event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Generic event data for the service start notification.</param>
     public void OnServiceStarted(object? sender, EventArgs eventData)
         => _logger.LogDebug("Now Live service has started successfully");
 
+    /// <summary>
+    /// Handles the service-exited event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Generic event data for the service exit notification.</param>
     public void OnServiceExited(object? sender, EventArgs eventData)
         => _logger.LogDebug("Now Live service has exited");
 
+    /// <summary>
+    /// Handles the user-added event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users that were added to tracking.</param>
     public void OnUserAdded(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("{Count} user(s) added to tracking list", eventData.Users.Count);
     }
 
+    /// <summary>
+    /// Handles the user-removed event.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Users that were removed from tracking.</param>
     public void OnUserRemoved(object? sender, UsersEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug("{Count} user(s) removed from tracking list", eventData.Users.Count);
     }
 
+    /// <summary>
+    /// Handles per-user broadcast processing errors.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    /// <param name="eventData">Error details for the failed user update.</param>
     public void OnUserStreamError(object? sender, ErrorEventArguments eventData)
     {
         if (_logger.IsEnabled(LogLevel.Error))
@@ -246,6 +289,9 @@ public sealed class BroadcastStates(
 /// </summary>
 public sealed class ServiceEventArguments(CancellationToken cancellationToken) : EventArgs
 {
+    /// <summary>
+    /// Cancellation token associated with the lifecycle event.
+    /// </summary>
     public CancellationToken CancellationToken { get; } = cancellationToken;
 }
 
@@ -254,7 +300,14 @@ public sealed class ServiceEventArguments(CancellationToken cancellationToken) :
 /// </summary>
 public sealed class UsersEventArguments(CancellationToken cancellationToken) : EventArgs
 {
+    /// <summary>
+    /// Users associated with the current event.
+    /// </summary>
     public List<TwitchStreamer> Users { get; set; } = [];
+
+    /// <summary>
+    /// Cancellation token associated with the current processing operation.
+    /// </summary>
     public CancellationToken CancellationToken { get; } = cancellationToken;
 }
 
@@ -263,7 +316,18 @@ public sealed class UsersEventArguments(CancellationToken cancellationToken) : E
 /// </summary>
 public sealed class ErrorEventArguments(string userId, string message, Exception exception) : EventArgs
 {
+    /// <summary>
+    /// Twitch user ID that failed during processing.
+    /// </summary>
     public string UserId { get; } = userId;
+
+    /// <summary>
+    /// Error message associated with the failure.
+    /// </summary>
     public string Message { get; } = message;
+
+    /// <summary>
+    /// Exception thrown while processing the user.
+    /// </summary>
     public Exception Exception { get; } = exception;
 }

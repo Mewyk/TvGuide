@@ -7,6 +7,9 @@ using TvGuide.Twitch;
 
 namespace TvGuide.Modules;
 
+/// <summary>
+/// Retrieves clip data from the Twitch Helix clips endpoint.
+/// </summary>
 public sealed class ClipsModule(
     HttpClient httpClient,
     IAuthenticationModule authService,
@@ -17,6 +20,7 @@ public sealed class ClipsModule(
     private readonly Settings.Twitch _settings = settings.Value.Twitch;
     private readonly HttpClient _httpClient = httpClient;
 
+    /// <inheritdoc/>
     public async Task<(IReadOnlyList<TwitchClip> Clips, string? NextCursor)> GetClipsAsync(
         TwitchClipRequest parameters,
         CancellationToken cancellationToken = default)
@@ -50,6 +54,7 @@ public sealed class ClipsModule(
             : (result.Data, result.Pagination?.Cursor);
     }
 
+    /// <inheritdoc/>
     public async IAsyncEnumerable<TwitchClip> GetAllClipsAsync(
         TwitchClipRequest parameters,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -102,16 +107,55 @@ public sealed class ClipsModule(
 /// </summary>
 public sealed record TwitchClipRequest
 {
+    /// <summary>
+    /// Broadcaster ID to query clips for.
+    /// </summary>
     public string? BroadcasterId { get; init; }
+
+    /// <summary>
+    /// Game or category ID to query clips for.
+    /// </summary>
     public string? GameId { get; init; }
+
+    /// <summary>
+    /// Specific clip ID to retrieve.
+    /// </summary>
     public string? Id { get; init; }
+
+    /// <summary>
+    /// Inclusive UTC start time for the clip search window.
+    /// </summary>
     public DateTime? StartedAt { get; init; }
+
+    /// <summary>
+    /// Inclusive UTC end time for the clip search window.
+    /// </summary>
     public DateTime? EndedAt { get; init; }
+
+    /// <summary>
+    /// Maximum number of clips to return per page. Valid range: 1 to 100.
+    /// </summary>
     public int First { get; init; } = 20;
+
+    /// <summary>
+    /// Pagination cursor for retrieving the previous page.
+    /// </summary>
     public string? Before { get; init; }
+
+    /// <summary>
+    /// Pagination cursor for retrieving the next page.
+    /// </summary>
     public string? After { get; init; }
+
+    /// <summary>
+    /// Whether only featured clips should be returned.
+    /// </summary>
     public bool? IsFeatured { get; init; }
 
+    /// <summary>
+    /// Converts the request parameters into a Twitch Helix query string.
+    /// </summary>
+    /// <returns>A URL query string without a leading question mark.</returns>
     public string ToQueryString()
     {
         var parameters = new List<string>();
@@ -144,61 +188,114 @@ public sealed record TwitchClipRequest
 /// </summary>
 public sealed record TwitchClip
 {
+    /// <summary>
+    /// Clip identifier.
+    /// </summary>
     [JsonPropertyName("id")]
     public required string Id { get; init; }
 
+    /// <summary>
+    /// Public clip URL.
+    /// </summary>
     [JsonPropertyName("url")]
     public required string Url { get; init; }
 
+    /// <summary>
+    /// Embeddable clip URL.
+    /// </summary>
     [JsonPropertyName("embed_url")]
     public required string EmbedUrl { get; init; }
 
+    /// <summary>
+    /// Broadcaster user ID for the clipped channel.
+    /// </summary>
     [JsonPropertyName("broadcaster_id")]
     public required string BroadcasterId { get; init; }
 
+    /// <summary>
+    /// Broadcaster display name for the clipped channel.
+    /// </summary>
     [JsonPropertyName("broadcaster_name")]
     public required string BroadcasterName { get; init; }
 
+    /// <summary>
+    /// User ID of the clip creator.
+    /// </summary>
     [JsonPropertyName("creator_id")]
     public required string CreatorId { get; init; }
 
+    /// <summary>
+    /// Display name of the clip creator.
+    /// </summary>
     [JsonPropertyName("creator_name")]
     public required string CreatorName { get; init; }
 
+    /// <summary>
+    /// Associated VOD identifier when available.
+    /// </summary>
     [JsonPropertyName("video_id")]
     public required string VideoId { get; init; }
 
+    /// <summary>
+    /// Category or game ID for the clip.
+    /// </summary>
     [JsonPropertyName("game_id")]
     public required string GameId { get; init; }
 
+    /// <summary>
+    /// Language code associated with the clip.
+    /// </summary>
     [JsonPropertyName("language")]
     public required string Language { get; init; }
 
+    /// <summary>
+    /// Clip title.
+    /// </summary>
     [JsonPropertyName("title")]
     public required string Title { get; init; }
 
+    /// <summary>
+    /// Number of views for the clip.
+    /// </summary>
     [JsonPropertyName("view_count")]
     public required int ViewCount { get; init; }
 
+    /// <summary>
+    /// UTC timestamp when the clip was created.
+    /// </summary>
     [JsonPropertyName("created_at")]
     public required DateTime CreatedAt { get; init; }
 
+    /// <summary>
+    /// Thumbnail image URL for the clip.
+    /// </summary>
     [JsonPropertyName("thumbnail_url")]
     public required string ThumbnailUrl { get; init; }
 
+    /// <summary>
+    /// Clip duration in seconds.
+    /// </summary>
     [JsonPropertyName("duration")]
     public required float Duration { get; init; }
 
+    /// <summary>
+    /// Offset, in seconds, into the source VOD where the clip begins.
+    /// </summary>
     [JsonPropertyName("vod_offset")]
     public int? VodOffset { get; init; }
 
+    /// <summary>
+    /// Indicates whether the clip is featured.
+    /// </summary>
     [JsonPropertyName("is_featured")]
     public required bool IsFeatured { get; init; }
 }
 
 /// <summary>
-/// Twitch clips API response with pagination.
+/// Twitch clips API response payload.
 /// </summary>
+/// <param name="Data">Clips returned by the query.</param>
+/// <param name="Pagination">Pagination metadata for continuing the query.</param>
 public sealed record TwitchClipsResponse(
     [property: JsonPropertyName("data")] IReadOnlyList<TwitchClip> Data,
     [property: JsonPropertyName("pagination")] Pagination? Pagination);

@@ -121,6 +121,7 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Ensures the status message is rebuilt on startup to sync with current state.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the rebuild operation.</param>
     public async Task EnsureStatusMessageExistsAsync(CancellationToken cancellationToken)
     {
         await RebuildBroadcastMessageAsync(cancellationToken);
@@ -129,6 +130,8 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Adds a new broadcast and rebuilds the single Discord message.
     /// </summary>
+    /// <param name="twitchStreamer">Streamer data to add to the active broadcast message.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task CreateBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
@@ -163,6 +166,8 @@ public sealed class ActiveBroadcastsModule(
     /// Removes a broadcast and creates a new Discord message for remaining active broadcasts.
     /// The old message is left with the offline broadcast.
     /// </summary>
+    /// <param name="twitchStreamer">Streamer data identifying the broadcast to remove.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task RemoveBroadcastMessageAsync(TwitchStreamer twitchStreamer, CancellationToken cancellationToken)
     {
         await _semaphore.WaitAsync(cancellationToken);
@@ -217,6 +222,8 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Updates broadcast data and rebuilds the single Discord message.
     /// </summary>
+    /// <param name="twitchStreamer">Streamer data containing the latest broadcast state.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task UpdateBroadcastMessageAsync(
         TwitchStreamer twitchStreamer,
         CancellationToken cancellationToken)
@@ -318,6 +325,8 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Checks if a broadcast is already tracked.
     /// </summary>
+    /// <param name="twitchStreamer">Streamer data to locate in the tracked broadcast list.</param>
+    /// <returns><see langword="true"/> when the streamer already has a tracked message entry; otherwise, <see langword="false"/>.</returns>
     public bool IsMessageTracked(TwitchStreamer twitchStreamer) =>
         _activeBroadcasts.ActiveBroadcasts.Any(broadcast => broadcast.UserData.Id == twitchStreamer.UserData.Id);
 
@@ -421,6 +430,8 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Formats duration to human-readable string.
     /// </summary>
+    /// <param name="duration">Duration to format.</param>
+    /// <returns>A human-readable duration string using minutes and hours.</returns>
     public static string FormatDuration(TimeSpan duration)
     {
         static string Pluralize(int value, string singular) =>
@@ -441,9 +452,16 @@ public sealed class ActiveBroadcastsModule(
     /// <summary>
     /// Generates stream preview URL with cache-busting timestamp.
     /// </summary>
+    /// <param name="userLogin">Twitch login name used in the preview-image path.</param>
+    /// <param name="width">Requested preview width.</param>
+    /// <param name="height">Requested preview height.</param>
+    /// <returns>A Twitch CDN preview-image URL with a cache-busting timestamp.</returns>
     public static string GetStreamPreviewUrl(string userLogin, int width = 1280, int height = 720) =>
         $"https://static-cdn.jtvnw.net/previews-ttv/live_user_{userLogin}-{width}x{height}.jpg?{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
 
+    /// <summary>
+    /// Releases the semaphore used to serialize broadcast-message updates.
+    /// </summary>
     public void Dispose() => _semaphore.Dispose();
 }
 
@@ -471,8 +489,19 @@ public sealed class Broadcasts
     /// </summary>
     public sealed class BroadcastData
     {
+        /// <summary>
+        /// Persisted Twitch user profile information for the broadcast.
+        /// </summary>
         public required TwitchUser UserData { get; set; }
+
+        /// <summary>
+        /// Current live-stream data when the user is online; otherwise <see langword="null"/>.
+        /// </summary>
         public required TwitchStream? StreamData { get; set; }
+
+        /// <summary>
+        /// UTC timestamp when this broadcast entry was last refreshed.
+        /// </summary>
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 }
